@@ -37,7 +37,7 @@ def download_video(url: str, output_path: str) -> str:
         "max_filesize": 500 * 1024 * 1024,
         # Speed: concurrent fragment downloads (DASH/HLS)
         "concurrent_fragment_downloads": 8,
-        "buffersize": "256K",
+        "buffersize": 256 * 1024,  # 256KB in bytes
         # Stability: retries
         "retries": 15,
         "fragment_retries": 15,
