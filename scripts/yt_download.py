@@ -47,11 +47,20 @@ def write_segment(segment, filepath: str, use_vaapi: bool) -> None:
         )
 
 
-def download_video(url: str, output_path: str) -> str:
-    """Download a YouTube video to the given path, return the file path."""
-    out_dir = os.path.dirname(output_path)
-    out_base = os.path.splitext(os.path.basename(output_path))[0]
-    outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
+def clean_url(url: str) -> str:
+    """Strip timestamp and tracking params, keep only the video ID."""
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    clean = {k: v for k, v in params.items() if k == "v"}
+    return urlunparse(parsed._replace(query=urlencode(clean, doseq=True)))
+
+
+def download_video(url: str, out_dir: str) -> str:
+    """Download a YouTube video to out_dir, return the actual file path."""
+    url = clean_url(url)
+    # Use a fixed base name; %(ext)s lets yt-dlp pick the real extension
+    outtmpl = os.path.join(out_dir, "source.%(ext)s")
     ydl_opts = {
         # Video only, prefer highest bitrate up to 1440p
         "format": "bestvideo[height<=1440]/best[height<=1440]",
@@ -61,7 +70,7 @@ def download_video(url: str, output_path: str) -> str:
         "max_filesize": 5 * 1024 * 1024 * 1024,  # 5GB
         # Speed: concurrent fragment downloads (DASH/HLS)
         "concurrent_fragment_downloads": 8,
-        "buffersize": 256 * 1024,  # 256KB in bytes
+        "buffersize": 256 * 1024,
         # Stability: retries
         "retries": 15,
         "fragment_retries": 15,
@@ -79,21 +88,17 @@ def download_video(url: str, output_path: str) -> str:
         )
         sys.stderr.flush()
         ydl.download([url])
-    # yt-dlp may create exact path or add id; find the actual file
-    if os.path.exists(output_path):
-        return output_path
-    # Check for any video file (merge may use different name, or write to subdir)
-    for root, _dirs, files in os.walk(out_dir):
-        for f in files:
-            if f.endswith((".mp4", ".mkv", ".webm")):
-                return os.path.join(root, f)
-    # Diagnostic: list what IS in the dir when we fail
+    # Find whatever file yt-dlp actually wrote (could be .webm, .mp4, .mkv)
+    VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".avi", ".mov")
+    for f in os.listdir(out_dir):
+        if f.lower().endswith(VIDEO_EXTS):
+            return os.path.join(out_dir, f)
     try:
         contents = os.listdir(out_dir)
     except OSError as e:
         contents = [f"listdir failed: {e}"]
     raise FileNotFoundError(
-        f"Download completed but no .mp4 found at {output_path}. "
+        f"Download completed but no video file found in {out_dir}. "
         f"Directory contents: {contents}"
     )
 
@@ -205,8 +210,9 @@ def main():
         progress["step"] = "Downloading video from YouTube..."
         print(json.dumps(progress), flush=True)
 
-        video_path = os.path.join(download_dir, "source.mp4")
-        download_video(args.url, video_path)
+        video_path = download_video(args.url, download_dir)
+        sys.stderr.write(f"[yt-dlp] Saved to: {video_path}\n")
+        sys.stderr.flush()
 
         progress["step"] = f"Cutting {args.clips} x {args.duration}s clips..."
         print(json.dumps(progress), flush=True)
@@ -231,6 +237,7 @@ def main():
         print(json.dumps(progress), flush=True)
         sys.exit(1)
     finally:
+        # Clean up the download dir after clips are cut
         shutil.rmtree(download_dir, ignore_errors=True)
 
 
