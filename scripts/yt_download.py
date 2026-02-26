@@ -47,31 +47,24 @@ def get_duration(video_path: str) -> float:
 
 def cut_with_ffmpeg(
     input_path: str, start: float, duration: int,
-    output_path: str, use_vaapi: bool,
+    output_path: str,
 ) -> None:
-    """Cut a segment using FFmpeg directly, with GPU or CPU encoding."""
-    if use_vaapi:
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-vaapi_device", VAAPI_DEVICE,
-            "-ss", f"{start:.3f}", "-t", str(duration),
-            "-i", input_path,
-            "-an",
-            "-vf", "format=nv12,hwupload",
-            "-c:v", "h264_vaapi", "-qp", "18",
-            "-movflags", "+faststart",
-            output_path,
-        ]
-    else:
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", f"{start:.3f}", "-t", str(duration),
-            "-i", input_path,
-            "-an",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            "-movflags", "+faststart",
-            output_path,
-        ]
+    """Cut a segment using FFmpeg with VAAPI GPU encoding."""
+    if not has_vaapi():
+        raise RuntimeError(
+            f"VAAPI device {VAAPI_DEVICE} not available. GPU encoding is required."
+        )
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-vaapi_device", VAAPI_DEVICE,
+        "-ss", f"{start:.3f}", "-t", str(duration),
+        "-i", input_path,
+        "-an",
+        "-vf", "format=nv12,hwupload",
+        "-c:v", "h264_vaapi", "-qp", "18",
+        "-movflags", "+faststart",
+        output_path,
+    ]
     subprocess.run(cmd, check=True)
 
 
@@ -140,7 +133,7 @@ def cut_segments(
 ) -> list[str]:
     """
     Trim first/last 10s from the video, then cut random segments of
-    the specified duration using FFmpeg directly (GPU when available).
+    the specified duration using FFmpeg with VAAPI GPU encoding.
     """
     total_duration = get_duration(video_path)
 
@@ -174,28 +167,14 @@ def cut_segments(
 
     chosen_starts = sorted(random.sample(all_possible_starts, actual_clips))
 
-    use_vaapi = has_vaapi()
-    if use_vaapi:
-        sys.stderr.write("[encode] Using VAAPI (GPU) for clip encoding\n")
-    else:
-        sys.stderr.write("[encode] Using libx264 (CPU) for clip encoding\n")
+    sys.stderr.write("[encode] Using VAAPI (GPU) for clip encoding\n")
     sys.stderr.flush()
 
     output_files = []
     for i, start_time in enumerate(chosen_starts):
         filename = f"bg_{start_index + i:03d}.mp4"
         filepath = os.path.join(output_dir, filename)
-
-        try:
-            cut_with_ffmpeg(video_path, start_time, duration, filepath, use_vaapi)
-        except subprocess.CalledProcessError:
-            if use_vaapi:
-                sys.stderr.write("[encode] VAAPI failed, falling back to CPU\n")
-                sys.stderr.flush()
-                use_vaapi = False
-                cut_with_ffmpeg(video_path, start_time, duration, filepath, False)
-            else:
-                raise
+        cut_with_ffmpeg(video_path, start_time, duration, filepath)
         output_files.append(filepath)
 
     return output_files

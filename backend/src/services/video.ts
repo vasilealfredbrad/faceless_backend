@@ -14,7 +14,7 @@ function hasVaapi(): boolean {
   if (_vaapiChecked) return _vaapiAvailable;
   _vaapiChecked = true;
   if (!fs.existsSync(VAAPI_DEVICE)) {
-    console.log("[video] VAAPI device not found, using CPU");
+    console.error("[video] VAAPI device not found:", VAAPI_DEVICE);
     _vaapiAvailable = false;
     return false;
   }
@@ -28,7 +28,7 @@ function hasVaapi(): boolean {
     console.log("[video] VAAPI encode test passed — GPU available");
     _vaapiAvailable = true;
   } catch {
-    console.log("[video] VAAPI encode test failed — using CPU");
+    console.error("[video] VAAPI encode test failed — GPU not functional");
     _vaapiAvailable = false;
   }
   return _vaapiAvailable;
@@ -68,32 +68,28 @@ function runEncode(
   escapedAssPath: string,
   duration: number,
   outputPath: string,
-  useVaapi: boolean,
 ): Promise<string> {
+  if (!hasVaapi()) {
+    throw new Error(
+      `VAAPI device ${VAAPI_DEVICE} not available. GPU encoding is required.`
+    );
+  }
+
   const outputFilename = path.basename(outputPath);
 
-  const filter = useVaapi
-    ? `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${escapedAssPath}',format=nv12,hwupload[v]`
-    : `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${escapedAssPath}'[v]`;
-
-  const videoOpts = useVaapi
-    ? ["-c:v", "h264_vaapi", "-qp", "18"]
-    : ["-c:v", "libx264", "-preset", "fast", "-crf", "23"];
+  const filter =
+    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${escapedAssPath}',format=nv12,hwupload[v]`;
 
   return new Promise((resolve, reject) => {
-    let cmd = ffmpeg().input(bgPath);
-
-    if (useVaapi) {
-      cmd = cmd.inputOptions(["-vaapi_device", VAAPI_DEVICE]);
-    }
-
-    cmd
+    ffmpeg()
+      .input(bgPath)
+      .inputOptions(["-vaapi_device", VAAPI_DEVICE])
       .input(audioPath)
       .complexFilter([filter])
       .outputOptions([
         "-map", "[v]",
         "-map", "1:a",
-        ...videoOpts,
+        "-c:v", "h264_vaapi", "-qp", "18",
         "-c:a", "aac",
         "-b:a", "192k",
         "-t", String(duration),
@@ -101,7 +97,7 @@ function runEncode(
       ])
       .output(outputPath)
       .on("end", () => {
-        console.log(`[video] Encoded with ${useVaapi ? "VAAPI (GPU)" : "libx264 (CPU)"}`);
+        console.log("[video] Encoded with VAAPI (GPU)");
         resolve(outputFilename);
       })
       .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
@@ -119,13 +115,5 @@ export async function assembleVideo(
 
   const escapedAssPath = assPath.replace(/\\/g, "/").replace(/:/g, "\\:");
 
-  if (hasVaapi()) {
-    try {
-      return await runEncode(bgPath, audioPath, escapedAssPath, duration, outputPath, true);
-    } catch (err) {
-      console.warn(`[video] VAAPI failed, falling back to CPU: ${(err as Error).message}`);
-    }
-  }
-
-  return runEncode(bgPath, audioPath, escapedAssPath, duration, outputPath, false);
+  return runEncode(bgPath, audioPath, escapedAssPath, duration, outputPath);
 }
