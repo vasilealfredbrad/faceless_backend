@@ -77,13 +77,17 @@ function runEncode(
 
   const outputFilename = path.basename(outputPath);
 
+  // scale + crop + subtitles on CPU, then convert to nv12 and upload to GPU
   const filter =
-    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${escapedAssPath}',format=nv12,hwupload[v]`;
+    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${escapedAssPath}',format=nv12|vaapi,hwupload[v]`;
 
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(bgPath)
-      .inputOptions(["-vaapi_device", VAAPI_DEVICE])
+      .inputOptions([
+        "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
+        "-filter_hw_device", "va",
+      ])
       .input(audioPath)
       .complexFilter([filter])
       .outputOptions([
