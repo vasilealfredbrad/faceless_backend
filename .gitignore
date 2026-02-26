@@ -11,6 +11,7 @@ python-env/
 
 # Generated / runtime
 generated/
+yt_download_raw/
 videos/
 *.log
 *.mp4

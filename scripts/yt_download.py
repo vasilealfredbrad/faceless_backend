@@ -8,8 +8,10 @@ import argparse
 import json
 import os
 import random
+import shutil
 import sys
-import tempfile
+import time
+import uuid
 
 import yt_dlp
 from moviepy import VideoFileClip
@@ -24,6 +26,7 @@ def download_video(url: str, output_path: str) -> str:
     # Force temp and home to our writable dir - yt-dlp/ffmpeg use system /tmp by default,
     # which can cause permission issues or "file not found" when merge completes elsewhere
     ydl_opts = {
+        # Prefer single-file progressive mp4 (no merge) > merge video+audio > fallback
         "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
         "outtmpl": outtmpl,
         "paths": {"temp": out_dir, "home": out_dir},
@@ -32,6 +35,14 @@ def download_video(url: str, output_path: str) -> str:
         "no_warnings": True,
         "noplaylist": True,
         "max_filesize": 500 * 1024 * 1024,
+        # Speed: concurrent fragment downloads (DASH/HLS)
+        "concurrent_fragment_downloads": 8,
+        "buffersize": "256K",
+        # Stability: retries
+        "retries": 15,
+        "fragment_retries": 15,
+        "file_access_retries": 5,
+        "extractor_retries": 5,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -101,7 +112,7 @@ def cut_segments(
             filepath,
             codec="libx264",
             audio=False,
-            preset="fast",
+            preset="veryfast",
             logger=None,
         )
         segment.close()
@@ -126,46 +137,49 @@ def main():
     progress = {"step": "", "error": ""}
 
     # Use a writable temp dir: --tmp-dir > env YT_TMPDIR > TMPDIR > system default
-    tmp_base = args.tmp_dir or os.environ.get("YT_TMPDIR") or os.environ.get("TMPDIR") or None
-    if tmp_base is not None and not os.path.isdir(tmp_base):
-        progress["error"] = f"Temp directory does not exist or is not writable: {tmp_base}"
+    base_dir = args.tmp_dir or os.environ.get("YT_TMPDIR") or os.environ.get("TMPDIR") or "/tmp"
+    if not os.path.isdir(base_dir):
+        progress["error"] = f"Base directory does not exist or is not writable: {base_dir}"
         print(json.dumps(progress), flush=True)
         sys.exit(1)
+
+    download_dir = os.path.join(base_dir, f"yt_{int(time.time())}_{uuid.uuid4().hex[:8]}")
+    os.makedirs(download_dir, exist_ok=True)
 
     try:
         progress["step"] = "Downloading video from YouTube..."
         print(json.dumps(progress), flush=True)
 
-        with tempfile.TemporaryDirectory(dir=tmp_base) as tmp_dir:
-            tmp_file = os.path.join(tmp_dir, "source.mp4")
-            # Ensure ffmpeg (spawned by yt-dlp for merge) uses our writable dir for temp files
-            os.environ["TMPDIR"] = tmp_dir
-            os.environ["TEMP"] = tmp_dir
-            os.environ["TMP"] = tmp_dir
-            download_video(args.url, tmp_file)
+        video_path = os.path.join(download_dir, "source.mp4")
+        os.environ["TMPDIR"] = download_dir
+        os.environ["TEMP"] = download_dir
+        os.environ["TMP"] = download_dir
+        download_video(args.url, video_path)
 
-            progress["step"] = f"Cutting {args.clips} x {args.duration}s clips..."
-            print(json.dumps(progress), flush=True)
+        progress["step"] = f"Cutting {args.clips} x {args.duration}s clips..."
+        print(json.dumps(progress), flush=True)
 
-            output_files = cut_segments(
-                tmp_file,
-                args.category,
-                args.duration,
-                args.clips,
-                args.videos_dir,
-            )
+        output_files = cut_segments(
+            video_path,
+            args.category,
+            args.duration,
+            args.clips,
+            args.videos_dir,
+        )
 
-            result = {
-                "step": "Done!",
-                "files": output_files,
-                "count": len(output_files),
-            }
-            print(json.dumps(result), flush=True)
+        result = {
+            "step": "Done!",
+            "files": output_files,
+            "count": len(output_files),
+        }
+        print(json.dumps(result), flush=True)
 
     except Exception as e:
         progress["error"] = str(e)
         print(json.dumps(progress), flush=True)
         sys.exit(1)
+    finally:
+        shutil.rmtree(download_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ COPY scripts/ ./scripts/
 RUN python3 -m venv /app/python-env && \
     /app/python-env/bin/pip install --no-cache-dir -r /app/scripts/requirements.txt
 
-RUN mkdir -p /app/videos/minecraft/30 /app/videos/minecraft/60 /app/generated
+RUN mkdir -p /app/videos/minecraft/30 /app/videos/minecraft/60 /app/generated /app/yt_download_raw
 
 RUN groupadd --system appuser && useradd --system --gid appuser appuser && \
     chown -R appuser:appuser /app

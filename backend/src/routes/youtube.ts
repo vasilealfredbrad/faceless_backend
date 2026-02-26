@@ -137,8 +137,8 @@ youtubeRoute.post(
     const pythonBin = findPython();
     const scriptPath = path.join(SCRIPTS_DIR, "yt_download.py");
 
-    const generatedDir = path.resolve(CWD, "generated");
-    fs.mkdirSync(generatedDir, { recursive: true });
+    const ytDownloadDir = path.resolve(CWD, "yt_download_raw");
+    fs.mkdirSync(ytDownloadDir, { recursive: true });
     const proc = spawn(pythonBin, [
       scriptPath,
       "--url", url,
@@ -146,13 +146,13 @@ youtubeRoute.post(
       "--duration", String(duration),
       "--clips", String(numClips),
       "--videos-dir", VIDEOS_DIR,
-      "--tmp-dir", generatedDir,
+      "--tmp-dir", ytDownloadDir,
     ], {
       cwd: CWD,
       env: {
         ...process.env,
-        YT_TMPDIR: generatedDir,
-        TMPDIR: generatedDir,
+        YT_TMPDIR: ytDownloadDir,
+        TMPDIR: ytDownloadDir,
       },
     });
 
