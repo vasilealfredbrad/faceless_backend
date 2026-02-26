@@ -8,8 +8,8 @@ services:
     devices:
       - /dev/dri:/dev/dri
     group_add:
-      - video
-      - render
+      - "44"
+      - "991"
     volumes:
       - ./videos:/app/videos
       - ./generated:/app/generated
