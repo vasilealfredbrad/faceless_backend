@@ -21,9 +21,12 @@ def download_video(url: str, output_path: str) -> str:
     out_base = os.path.splitext(os.path.basename(output_path))[0]
     # Use template so merged output goes to exact path; avoid placeholders that can change the name
     outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
+    # Force temp and home to our writable dir - yt-dlp/ffmpeg use system /tmp by default,
+    # which can cause permission issues or "file not found" when merge completes elsewhere
     ydl_opts = {
         "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
         "outtmpl": outtmpl,
+        "paths": {"temp": out_dir, "home": out_dir},
         "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
@@ -135,6 +138,10 @@ def main():
 
         with tempfile.TemporaryDirectory(dir=tmp_base) as tmp_dir:
             tmp_file = os.path.join(tmp_dir, "source.mp4")
+            # Ensure ffmpeg (spawned by yt-dlp for merge) uses our writable dir for temp files
+            os.environ["TMPDIR"] = tmp_dir
+            os.environ["TEMP"] = tmp_dir
+            os.environ["TMP"] = tmp_dir
             download_video(args.url, tmp_file)
 
             progress["step"] = f"Cutting {args.clips} x {args.duration}s clips..."
