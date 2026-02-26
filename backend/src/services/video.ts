@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import ffmpeg from "fluent-ffmpeg";
 import fs from "fs";
 import path from "path";
@@ -5,6 +6,33 @@ import path from "path";
 const VIDEOS_DIR = path.resolve(process.cwd(), "videos");
 const GENERATED_DIR = path.resolve(process.cwd(), "generated");
 const VAAPI_DEVICE = "/dev/dri/renderD128";
+
+let _vaapiChecked = false;
+let _vaapiAvailable = false;
+
+function hasVaapi(): boolean {
+  if (_vaapiChecked) return _vaapiAvailable;
+  _vaapiChecked = true;
+  if (!fs.existsSync(VAAPI_DEVICE)) {
+    console.log("[video] VAAPI device not found, using CPU");
+    _vaapiAvailable = false;
+    return false;
+  }
+  try {
+    execSync(
+      `ffmpeg -hide_banner -init_hw_device vaapi=va:${VAAPI_DEVICE} ` +
+      `-f lavfi -i nullsrc=s=64x64:d=0.1 ` +
+      `-vf "format=nv12,hwupload" -c:v h264_vaapi -frames:v 1 -f null -`,
+      { stdio: "ignore", timeout: 10_000 },
+    );
+    console.log("[video] VAAPI encode test passed — GPU available");
+    _vaapiAvailable = true;
+  } catch {
+    console.log("[video] VAAPI encode test failed — using CPU");
+    _vaapiAvailable = false;
+  }
+  return _vaapiAvailable;
+}
 
 export interface AssembleOptions {
   audioPath: string;
@@ -34,14 +62,6 @@ function pickRandomBackground(category: string, duration: 30 | 60): string {
   return path.join(dir, pick);
 }
 
-function hasVaapi(): boolean {
-  try {
-    return fs.existsSync(VAAPI_DEVICE);
-  } catch {
-    return false;
-  }
-}
-
 function runEncode(
   bgPath: string,
   audioPath: string,
@@ -60,19 +80,14 @@ function runEncode(
     ? ["-c:v", "h264_vaapi", "-qp", "18"]
     : ["-c:v", "libx264", "-preset", "fast", "-crf", "23"];
 
-  const inputOpts = useVaapi
-    ? ["-vaapi_device", VAAPI_DEVICE]
-    : [];
-
   return new Promise((resolve, reject) => {
-    let cmd = ffmpeg();
+    let cmd = ffmpeg().input(bgPath);
 
-    if (inputOpts.length > 0) {
-      cmd = cmd.inputOptions(inputOpts);
+    if (useVaapi) {
+      cmd = cmd.inputOptions(["-vaapi_device", VAAPI_DEVICE]);
     }
 
     cmd
-      .input(bgPath)
       .input(audioPath)
       .complexFilter([filter])
       .outputOptions([
