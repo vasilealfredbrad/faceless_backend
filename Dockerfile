@@ -8,7 +8,7 @@ RUN npm run build
 FROM node:20-slim AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      ffmpeg fonts-liberation libass9 curl fontconfig \
+      ffmpeg fonts-liberation libass9 curl fontconfig gosu \
       python3 python3-venv python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /usr/share/fonts/truetype/montserrat && \
@@ -29,10 +29,13 @@ RUN mkdir -p /app/videos/minecraft/30 /app/videos/minecraft/60 /app/generated
 
 RUN groupadd --system appuser && useradd --system --gid appuser appuser && \
     chown -R appuser:appuser /app
-USER appuser
+
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]
