@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/signed-url", "destination": "/api/signed-url" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

@@ -1,6 +1,3 @@
-# Frontend lives in separate repo
-frontend/
-
 # Dependencies & build
 node_modules/
 dist/
@@ -25,3 +22,4 @@ videos/
 
 # Supabase CLI temp
 supabase/.temp/
+
