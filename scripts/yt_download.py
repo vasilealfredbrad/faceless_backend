@@ -16,6 +16,36 @@ import uuid
 import yt_dlp
 from moviepy import VideoFileClip
 
+VAAPI_DEVICE = "/dev/dri/renderD128"
+
+
+def has_vaapi() -> bool:
+    return os.path.exists(VAAPI_DEVICE)
+
+
+def write_segment(segment, filepath: str, use_vaapi: bool) -> None:
+    if use_vaapi:
+        segment.write_videofile(
+            filepath,
+            codec="h264_vaapi",
+            audio=False,
+            ffmpeg_params=[
+                "-vaapi_device", VAAPI_DEVICE,
+                "-pix_fmt", "vaapi",
+                "-qp", "18",
+            ],
+            logger=None,
+        )
+    else:
+        segment.write_videofile(
+            filepath,
+            codec="libx264",
+            audio=False,
+            preset="medium",
+            ffmpeg_params=["-crf", "18"],
+            logger=None,
+        )
+
 
 def download_video(url: str, output_path: str) -> str:
     """Download a YouTube video to the given path, return the file path."""
@@ -23,11 +53,10 @@ def download_video(url: str, output_path: str) -> str:
     out_base = os.path.splitext(os.path.basename(output_path))[0]
     outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
     ydl_opts = {
-        # Video only (no audio needed for bg clips) - no merge, faster download
+        # Video only, prefer highest bitrate up to 1440p
         "format": "bestvideo[height<=1440]/best[height<=1440]",
+        "format_sort": ["res:1440", "vbr", "fps"],
         "outtmpl": outtmpl,
-        "quiet": True,
-        "no_warnings": True,
         "noplaylist": True,
         "max_filesize": 5 * 1024 * 1024 * 1024,  # 5GB
         # Speed: concurrent fragment downloads (DASH/HLS)
@@ -40,6 +69,15 @@ def download_video(url: str, output_path: str) -> str:
         "extractor_retries": 5,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        fmt = info.get("format", "unknown")
+        height = info.get("height", "?")
+        vbr = info.get("vbr", "?")
+        fsize = info.get("filesize") or info.get("filesize_approx") or 0
+        sys.stderr.write(
+            f"[yt-dlp] Selected: {fmt} | {height}p | vbr={vbr} | ~{fsize/(1024*1024):.0f}MB\n"
+        )
+        sys.stderr.flush()
         ydl.download([url])
     # yt-dlp may create exact path or add id; find the actual file
     if os.path.exists(output_path):
@@ -105,6 +143,13 @@ def cut_segments(
 
     chosen_starts = sorted(random.sample(all_possible_starts, actual_clips))
 
+    use_vaapi = has_vaapi()
+    if use_vaapi:
+        sys.stderr.write("[encode] Using VAAPI (GPU) for clip encoding\n")
+    else:
+        sys.stderr.write("[encode] Using libx264 (CPU) for clip encoding\n")
+    sys.stderr.flush()
+
     output_files = []
     for i, start_time in enumerate(chosen_starts):
         end_time = start_time + duration
@@ -115,14 +160,16 @@ def cut_segments(
         filename = f"bg_{start_index + i:03d}.mp4"
         filepath = os.path.join(output_dir, filename)
 
-        segment.write_videofile(
-            filepath,
-            codec="libx264",
-            audio=False,
-            preset="medium",
-            ffmpeg_params=["-crf", "18"],
-            logger=None,
-        )
+        try:
+            write_segment(segment, filepath, use_vaapi)
+        except Exception:
+            if use_vaapi:
+                sys.stderr.write("[encode] VAAPI failed, falling back to CPU\n")
+                sys.stderr.flush()
+                use_vaapi = False
+                write_segment(segment, filepath, False)
+            else:
+                raise
         segment.close()
         output_files.append(filepath)
 

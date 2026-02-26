@@ -9,7 +9,8 @@ FROM node:20-slim AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ffmpeg fonts-liberation libass9 curl fontconfig gosu \
-      python3 python3-venv python3-pip && \
+      python3 python3-venv python3-pip \
+      mesa-va-drivers vainfo libva2 && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /usr/share/fonts/truetype/montserrat && \
     curl -sL -o /usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf \
