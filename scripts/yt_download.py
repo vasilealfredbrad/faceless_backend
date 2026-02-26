@@ -9,42 +9,70 @@ import json
 import os
 import random
 import shutil
+import subprocess
 import sys
 import time
 import uuid
 
 import yt_dlp
-from moviepy import VideoFileClip
 
 VAAPI_DEVICE = "/dev/dri/renderD128"
 
 
 def has_vaapi() -> bool:
-    return os.path.exists(VAAPI_DEVICE)
+    if not os.path.exists(VAAPI_DEVICE):
+        return False
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}",
+             "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+             "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-frames:v", "1",
+             "-f", "null", "-"],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
-def write_segment(segment, filepath: str, use_vaapi: bool) -> None:
+def get_duration(video_path: str) -> float:
+    """Get video duration in seconds using ffprobe."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+        capture_output=True, text=True,
+    )
+    return float(r.stdout.strip())
+
+
+def cut_with_ffmpeg(
+    input_path: str, start: float, duration: int,
+    output_path: str, use_vaapi: bool,
+) -> None:
+    """Cut a segment using FFmpeg directly, with GPU or CPU encoding."""
     if use_vaapi:
-        segment.write_videofile(
-            filepath,
-            codec="h264_vaapi",
-            audio=False,
-            ffmpeg_params=[
-                "-vaapi_device", VAAPI_DEVICE,
-                "-pix_fmt", "vaapi",
-                "-qp", "18",
-            ],
-            logger=None,
-        )
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-vaapi_device", VAAPI_DEVICE,
+            "-ss", f"{start:.3f}", "-t", str(duration),
+            "-i", input_path,
+            "-an",
+            "-vf", "format=nv12,hwupload",
+            "-c:v", "h264_vaapi", "-qp", "18",
+            "-movflags", "+faststart",
+            output_path,
+        ]
     else:
-        segment.write_videofile(
-            filepath,
-            codec="libx264",
-            audio=False,
-            preset="medium",
-            ffmpeg_params=["-crf", "18"],
-            logger=None,
-        )
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{start:.3f}", "-t", str(duration),
+            "-i", input_path,
+            "-an",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+    subprocess.run(cmd, check=True)
 
 
 def clean_url(url: str) -> str:
@@ -112,17 +140,15 @@ def cut_segments(
 ) -> list[str]:
     """
     Trim first/last 10s from the video, then cut random segments of
-    the specified duration. Returns list of output file paths.
+    the specified duration using FFmpeg directly (GPU when available).
     """
-    clip = VideoFileClip(video_path)
-    total_duration = clip.duration
+    total_duration = get_duration(video_path)
 
     trim_start = 10.0
     trim_end = max(total_duration - 10.0, trim_start + duration)
 
     usable_duration = trim_end - trim_start
     if usable_duration < duration:
-        clip.close()
         raise ValueError(
             f"Video too short after trimming. Usable: {usable_duration:.1f}s, "
             f"need at least {duration}s"
@@ -157,28 +183,21 @@ def cut_segments(
 
     output_files = []
     for i, start_time in enumerate(chosen_starts):
-        end_time = start_time + duration
-        segment = clip.subclipped(start_time, end_time)
-        if segment.audio is not None:
-            segment = segment.without_audio()
-
         filename = f"bg_{start_index + i:03d}.mp4"
         filepath = os.path.join(output_dir, filename)
 
         try:
-            write_segment(segment, filepath, use_vaapi)
-        except Exception:
+            cut_with_ffmpeg(video_path, start_time, duration, filepath, use_vaapi)
+        except subprocess.CalledProcessError:
             if use_vaapi:
                 sys.stderr.write("[encode] VAAPI failed, falling back to CPU\n")
                 sys.stderr.flush()
                 use_vaapi = False
-                write_segment(segment, filepath, False)
+                cut_with_ffmpeg(video_path, start_time, duration, filepath, False)
             else:
                 raise
-        segment.close()
         output_files.append(filepath)
 
-    clip.close()
     return output_files
 
 
