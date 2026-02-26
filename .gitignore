@@ -1,0 +1,27 @@
+# Frontend lives in separate repo
+frontend/
+
+# Dependencies & build
+node_modules/
+dist/
+backend/dist/
+python-env/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Generated / runtime
+generated/
+videos/
+*.log
+*.mp4
+*.mp3
+*.ass
+
+# IDE
+.cursor
+
+# Supabase CLI temp
+supabase/.temp/

@@ -1,0 +1,327 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "title": "System Overview",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "targets": [{ "expr": "process_uptime_seconds{service=\"faceless-backend\"}", "legendFormat": "uptime" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "title": "CPU Usage",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 10, "x": 4, "y": 1 },
+      "targets": [
+        { "expr": "rate(process_cpu_user_seconds_total{service=\"faceless-backend\"}[5m])", "legendFormat": "User CPU" },
+        { "expr": "rate(process_cpu_system_seconds_total{service=\"faceless-backend\"}[5m])", "legendFormat": "System CPU" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "fillOpacity": 20, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "Memory Usage (RSS)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 1 },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{service=\"faceless-backend\"}", "legendFormat": "RSS" },
+        { "expr": "nodejs_heap_size_used_bytes{service=\"faceless-backend\"}", "legendFormat": "Heap Used" },
+        { "expr": "nodejs_heap_size_total_bytes{service=\"faceless-backend\"}", "legendFormat": "Heap Total" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "Open File Descriptors",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 5 },
+      "targets": [{ "expr": "process_open_fds{service=\"faceless-backend\"}", "legendFormat": "FDs" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 500 }, { "color": "red", "value": 1000 }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "title": "Video Jobs",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+      "collapsed": false
+    },
+    {
+      "title": "Jobs In Progress",
+      "type": "gauge",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 11 },
+      "targets": [{ "expr": "jobs_in_progress", "legendFormat": "Active" }],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 4,
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 3 }] }
+        }
+      }
+    },
+    {
+      "title": "Jobs Completed vs Failed",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 10, "x": 4, "y": 11 },
+      "targets": [
+        { "expr": "increase(jobs_processed_total{status=\"completed\"}[1h])", "legendFormat": "Completed /hr" },
+        { "expr": "increase(jobs_processed_total{status=\"failed\"}[1h])", "legendFormat": "Failed /hr" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 30, "lineWidth": 2 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Failed /hr" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Completed /hr" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "title": "Total Jobs (All Time)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 3, "w": 5, "x": 14, "y": 11 },
+      "targets": [
+        { "expr": "jobs_processed_total{status=\"completed\"}", "legendFormat": "Completed" },
+        { "expr": "jobs_processed_total{status=\"failed\"}", "legendFormat": "Failed" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Failed" }, "properties": [{ "id": "thresholds", "value": { "steps": [{ "color": "red", "value": null }] } }] }
+        ]
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none" }
+    },
+    {
+      "title": "Success Rate",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 3, "w": 5, "x": 19, "y": 11 },
+      "targets": [
+        { "expr": "jobs_processed_total{status=\"completed\"} / (jobs_processed_total{status=\"completed\"} + jobs_processed_total{status=\"failed\"}) * 100", "legendFormat": "%" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 80 }, { "color": "green", "value": 95 }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "title": "Job Duration (p50 / p95 / p99)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 17 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(job_duration_seconds_bucket{status=\"completed\"}[30m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, rate(job_duration_seconds_bucket{status=\"completed\"}[30m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(job_duration_seconds_bucket{status=\"completed\"}[30m]))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 10, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "Job Duration by Type",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 17 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(job_duration_seconds_bucket{duration_type=\"30s\"}[30m]))", "legendFormat": "30s videos (p50)" },
+        { "expr": "histogram_quantile(0.5, rate(job_duration_seconds_bucket{duration_type=\"60s\"}[30m]))", "legendFormat": "60s videos (p50)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "HTTP & Uploads",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false
+    },
+    {
+      "title": "HTTP Request Rate",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "rate(http_requests_total[5m])", "legendFormat": "{{method}} {{route}} ({{status_code}})" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "fillOpacity": 20, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "HTTP Latency (p50 / p95)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 24 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(http_request_duration_seconds_bucket[5m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 10, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "Upload Duration by File Type",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 24 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(upload_duration_seconds_bucket[30m]))", "legendFormat": "{{file_type}} p50" },
+        { "expr": "histogram_quantile(0.95, rate(upload_duration_seconds_bucket[30m]))", "legendFormat": "{{file_type}} p95" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "Upload Size by File Type",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 30 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(upload_size_bytes_bucket[30m]))", "legendFormat": "{{file_type}} p50" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "HTTP Error Rate",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 30 },
+      "targets": [
+        { "expr": "rate(http_requests_total{status_code=~\"4..|5..\"}[5m])", "legendFormat": "{{status_code}} {{route}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "fillOpacity": 30, "lineWidth": 2 },
+          "color": { "fixedColor": "red", "mode": "fixed" }
+        }
+      }
+    },
+    {
+      "title": "Node.js Internals",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "collapsed": false
+    },
+    {
+      "title": "Event Loop Lag",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 37 },
+      "targets": [
+        { "expr": "nodejs_eventloop_lag_seconds{service=\"faceless-backend\"}", "legendFormat": "Event Loop Lag" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 15, "lineWidth": 2 },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.1 }, { "color": "red", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "title": "Active Handles & Requests",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 37 },
+      "targets": [
+        { "expr": "nodejs_active_handles_total{service=\"faceless-backend\"}", "legendFormat": "Active Handles" },
+        { "expr": "nodejs_active_requests_total{service=\"faceless-backend\"}", "legendFormat": "Active Requests" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "title": "GC Duration",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 37 },
+      "targets": [
+        { "expr": "rate(nodejs_gc_duration_seconds_sum{service=\"faceless-backend\"}[5m])", "legendFormat": "{{kind}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["faceless", "backend", "worker"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "Faceless Backend",
+  "uid": "faceless-backend",
+  "version": 1,
+  "refresh": "30s"
+}

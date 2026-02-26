@@ -1,0 +1,17 @@
+.env
+.env.*
+.git
+.gitignore
+.cursor
+node_modules
+frontend
+generated
+videos
+python-env
+*.mp4
+*.mp3
+*.ass
+*.log
+README.md
+docker-compose.yml
+.dockerignore
