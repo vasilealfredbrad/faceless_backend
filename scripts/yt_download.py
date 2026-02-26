@@ -23,8 +23,8 @@ def download_video(url: str, output_path: str) -> str:
     out_base = os.path.splitext(os.path.basename(output_path))[0]
     outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
     ydl_opts = {
-        # Prefer single-file mp4 (no merge). Max 2K (1440p)
-        "format": "best[height<=1440][ext=mp4]/bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/best[height<=1440]",
+        # Max 2K (1440p). Include webm for higher quality (YT serves 1440p as webm)
+        "format": "best[height<=1440][ext=mp4]/bestvideo[height<=1440]+bestaudio[ext=m4a]/best[height<=1440]",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "quiet": True,
@@ -118,7 +118,8 @@ def cut_segments(
             filepath,
             codec="libx264",
             audio=False,
-            preset="veryfast",
+            preset="medium",
+            ffmpeg_params=["-crf", "18"],
             logger=None,
         )
         segment.close()
