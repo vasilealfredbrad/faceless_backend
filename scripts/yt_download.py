@@ -17,9 +17,13 @@ from moviepy import VideoFileClip
 
 def download_video(url: str, output_path: str) -> str:
     """Download a YouTube video to a temp file, return the file path."""
+    out_dir = os.path.dirname(output_path)
+    out_base = os.path.splitext(os.path.basename(output_path))[0]
+    # Use template so merged output goes to exact path; avoid placeholders that can change the name
+    outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
     ydl_opts = {
         "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
-        "outtmpl": output_path,
+        "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
@@ -28,7 +32,13 @@ def download_video(url: str, output_path: str) -> str:
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
-    return output_path
+    # yt-dlp may create exact path or add id; find the actual file
+    if os.path.exists(output_path):
+        return output_path
+    for f in os.listdir(out_dir):
+        if f.endswith(".mp4"):
+            return os.path.join(out_dir, f)
+    raise FileNotFoundError(f"Download completed but no .mp4 found at {output_path}")
 
 
 def cut_segments(
@@ -106,15 +116,24 @@ def main():
     parser.add_argument("--clips", type=int, default=5, help="Number of clips to cut")
     parser.add_argument("--videos-dir", default=os.path.join(os.path.dirname(__file__), "..", "videos"),
                         help="Path to videos directory")
+    parser.add_argument("--tmp-dir", default=None,
+                        help="Writable temp directory for download (default: YT_TMPDIR or /tmp)")
     args = parser.parse_args()
 
     progress = {"step": "", "error": ""}
+
+    # Use a writable temp dir: --tmp-dir > env YT_TMPDIR > TMPDIR > system default
+    tmp_base = args.tmp_dir or os.environ.get("YT_TMPDIR") or os.environ.get("TMPDIR") or None
+    if tmp_base is not None and not os.path.isdir(tmp_base):
+        progress["error"] = f"Temp directory does not exist or is not writable: {tmp_base}"
+        print(json.dumps(progress), flush=True)
+        sys.exit(1)
 
     try:
         progress["step"] = "Downloading video from YouTube..."
         print(json.dumps(progress), flush=True)
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(dir=tmp_base) as tmp_dir:
             tmp_file = os.path.join(tmp_dir, "source.mp4")
             download_video(args.url, tmp_file)
 

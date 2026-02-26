@@ -6,7 +6,7 @@ services:
     ports:
       - "0.0.0.0:3000:3000"
     volumes:
-      - ./videos:/app/videos:ro
+      - ./videos:/app/videos
       - ./generated:/app/generated
     restart: unless-stopped
     deploy:
