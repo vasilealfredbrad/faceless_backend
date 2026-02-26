@@ -1,5 +1,4 @@
-import { execSync } from "child_process";
-import ffmpeg from "fluent-ffmpeg";
+import { execSync, spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -65,7 +64,7 @@ function pickRandomBackground(category: string, duration: 30 | 60): string {
 function runEncode(
   bgPath: string,
   audioPath: string,
-  escapedAssPath: string,
+  assPath: string,
   duration: number,
   outputPath: string,
 ): Promise<string> {
@@ -77,35 +76,45 @@ function runEncode(
 
   const outputFilename = path.basename(outputPath);
 
-  // scale + crop + subtitles on CPU, then convert to nv12 and upload to GPU
-  const filter =
-    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${escapedAssPath}',format=nv12|vaapi,hwupload[v]`;
+  const filterComplex =
+    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${assPath}',format=nv12,hwupload[v]`;
+
+  const args = [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
+    "-filter_hw_device", "va",
+    "-i", bgPath,
+    "-i", audioPath,
+    "-filter_complex", filterComplex,
+    "-map", "[v]",
+    "-map", "1:a",
+    "-c:v", "h264_vaapi", "-qp", "18",
+    "-c:a", "aac", "-b:a", "192k",
+    "-t", String(duration),
+    "-movflags", "+faststart",
+    outputPath,
+  ];
 
   return new Promise((resolve, reject) => {
-    ffmpeg()
-      .input(bgPath)
-      .inputOptions([
-        "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
-        "-filter_hw_device", "va",
-      ])
-      .input(audioPath)
-      .complexFilter([filter])
-      .outputOptions([
-        "-map", "[v]",
-        "-map", "1:a",
-        "-c:v", "h264_vaapi", "-qp", "18",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-t", String(duration),
-        "-movflags", "+faststart",
-      ])
-      .output(outputPath)
-      .on("end", () => {
+    const proc = spawn("ffmpeg", args);
+    let stderr = "";
+
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
         console.log("[video] Encoded with VAAPI (GPU)");
         resolve(outputFilename);
-      })
-      .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
-      .run();
+      } else {
+        reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
+      }
+    });
+
+    proc.on("error", (err) => {
+      reject(new Error(`FFmpeg spawn error: ${err.message}`));
+    });
   });
 }
 
