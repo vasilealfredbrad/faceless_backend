@@ -18,18 +18,14 @@ from moviepy import VideoFileClip
 
 
 def download_video(url: str, output_path: str) -> str:
-    """Download a YouTube video to a temp file, return the file path."""
+    """Download a YouTube video to the given path, return the file path."""
     out_dir = os.path.dirname(output_path)
     out_base = os.path.splitext(os.path.basename(output_path))[0]
-    # Use template so merged output goes to exact path; avoid placeholders that can change the name
     outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
-    # Force temp and home to our writable dir - yt-dlp/ffmpeg use system /tmp by default,
-    # which can cause permission issues or "file not found" when merge completes elsewhere
     ydl_opts = {
-        # Prefer single-file progressive mp4 (no merge) > merge video+audio > fallback
-        "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+        # Prefer single-file mp4 (no merge) to avoid ffmpeg merge path bugs
+        "format": "best[height<=1080][ext=mp4]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
         "outtmpl": outtmpl,
-        "paths": {"temp": out_dir, "home": out_dir},
         "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
@@ -49,10 +45,20 @@ def download_video(url: str, output_path: str) -> str:
     # yt-dlp may create exact path or add id; find the actual file
     if os.path.exists(output_path):
         return output_path
-    for f in os.listdir(out_dir):
-        if f.endswith(".mp4"):
-            return os.path.join(out_dir, f)
-    raise FileNotFoundError(f"Download completed but no .mp4 found at {output_path}")
+    # Check for any video file (merge may use different name, or write to subdir)
+    for root, _dirs, files in os.walk(out_dir):
+        for f in files:
+            if f.endswith((".mp4", ".mkv", ".webm")):
+                return os.path.join(root, f)
+    # Diagnostic: list what IS in the dir when we fail
+    try:
+        contents = os.listdir(out_dir)
+    except OSError as e:
+        contents = [f"listdir failed: {e}"]
+    raise FileNotFoundError(
+        f"Download completed but no .mp4 found at {output_path}. "
+        f"Directory contents: {contents}"
+    )
 
 
 def cut_segments(
@@ -130,16 +136,16 @@ def main():
     parser.add_argument("--clips", type=int, default=5, help="Number of clips to cut")
     parser.add_argument("--videos-dir", default=os.path.join(os.path.dirname(__file__), "..", "videos"),
                         help="Path to videos directory")
-    parser.add_argument("--tmp-dir", default=None,
-                        help="Writable temp directory for download (default: YT_TMPDIR or /tmp)")
+    parser.add_argument("--download-dir", default=None,
+                        help="Directory for downloads (default: YT_DOWNLOAD_DIR or yt_download_raw)")
     args = parser.parse_args()
 
     progress = {"step": "", "error": ""}
 
-    # Use a writable temp dir: --tmp-dir > env YT_TMPDIR > TMPDIR > system default
-    base_dir = args.tmp_dir or os.environ.get("YT_TMPDIR") or os.environ.get("TMPDIR") or "/tmp"
-    if not os.path.isdir(base_dir):
-        progress["error"] = f"Base directory does not exist or is not writable: {base_dir}"
+    # Download directory: --download-dir > env YT_DOWNLOAD_DIR
+    base_dir = args.download_dir or os.environ.get("YT_DOWNLOAD_DIR")
+    if not base_dir or not os.path.isdir(base_dir):
+        progress["error"] = f"Download directory required (--download-dir or YT_DOWNLOAD_DIR); got: {base_dir}"
         print(json.dumps(progress), flush=True)
         sys.exit(1)
 
@@ -151,9 +157,6 @@ def main():
         print(json.dumps(progress), flush=True)
 
         video_path = os.path.join(download_dir, "source.mp4")
-        os.environ["TMPDIR"] = download_dir
-        os.environ["TEMP"] = download_dir
-        os.environ["TMP"] = download_dir
         download_video(args.url, video_path)
 
         progress["step"] = f"Cutting {args.clips} x {args.duration}s clips..."

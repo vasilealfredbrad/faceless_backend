@@ -146,13 +146,12 @@ youtubeRoute.post(
       "--duration", String(duration),
       "--clips", String(numClips),
       "--videos-dir", VIDEOS_DIR,
-      "--tmp-dir", ytDownloadDir,
+      "--download-dir", ytDownloadDir,
     ], {
       cwd: CWD,
       env: {
         ...process.env,
-        YT_TMPDIR: ytDownloadDir,
-        TMPDIR: ytDownloadDir,
+        YT_DOWNLOAD_DIR: ytDownloadDir,
       },
     });
 
