@@ -23,8 +23,8 @@ def download_video(url: str, output_path: str) -> str:
     out_base = os.path.splitext(os.path.basename(output_path))[0]
     outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
     ydl_opts = {
-        # Prefer single-file mp4 (no merge) to avoid ffmpeg merge path bugs
-        "format": "best[height<=1080][ext=mp4]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
+        # Prefer single-file mp4 (no merge). Max 2K (1440p)
+        "format": "best[height<=1440][ext=mp4]/bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/best[height<=1440]",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "quiet": True,
