@@ -171,8 +171,18 @@ export interface CategoryInfo {
   clips60: number;
 }
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
+
 export async function getCategories(): Promise<CategoryInfo[]> {
-  return [];
+  if (!BACKEND_URL) return [];
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/youtube/categories`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.categories) ? data.categories : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface YouTubeDownloadRequest {
@@ -183,8 +193,64 @@ export interface YouTubeDownloadRequest {
 }
 
 export async function downloadYouTubeBackground(
-  _req: YouTubeDownloadRequest,
-  _onProgress?: (step: string) => void
+  req: YouTubeDownloadRequest,
+  onProgress?: (step: string) => void
 ): Promise<{ count: number; files: string[] }> {
-  throw new Error("YouTube management is only available from the local admin server");
+  if (!BACKEND_URL) throw new Error("Backend URL not configured. YouTube management requires VITE_BACKEND_URL when running locally.");
+  if (!req.url.trim()) throw new Error("YouTube URL is required");
+  if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(req.url)) {
+    throw new Error("Invalid YouTube URL");
+  }
+  if (!req.category || !/^[a-z0-9-]+$/i.test(req.category)) {
+    throw new Error("Invalid category name");
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (session?.access_token) {
+    headers["Authorization"] = `Bearer ${session.access_token}`;
+  }
+
+  const res = await fetch(`${BACKEND_URL}/api/youtube/download`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      url: req.url.trim(),
+      category: req.category,
+      duration: req.duration,
+      clips: Math.max(1, Math.min(20, req.clips)),
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Download failed" }));
+    throw new Error(err.error || "Download failed");
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response stream");
+
+  const decoder = new TextDecoder();
+  let lastResult: { count: number; files: string[] } | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    const lines = chunk.split("\n").filter((l) => l.startsWith("data: "));
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line.slice(6));
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.step && onProgress) onProgress(parsed.step);
+        if (parsed.count !== undefined) lastResult = parsed;
+      } catch (e) {
+        if (e instanceof Error && e.message !== "Unexpected end of JSON input")
+          throw e;
+      }
+    }
+  }
+
+  if (lastResult) return lastResult;
+  throw new Error("No result received");
 }

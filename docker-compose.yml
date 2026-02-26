@@ -3,6 +3,8 @@ services:
     build:
       context: .
     env_file: .env
+    ports:
+      - "0.0.0.0:3000:3000"
     volumes:
       - ./videos:/app/videos:ro
       - ./generated:/app/generated
