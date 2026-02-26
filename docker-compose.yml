@@ -9,6 +9,7 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       - video
+      - render
     volumes:
       - ./videos:/app/videos
       - ./generated:/app/generated
