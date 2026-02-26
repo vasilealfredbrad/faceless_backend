@@ -23,14 +23,13 @@ def download_video(url: str, output_path: str) -> str:
     out_base = os.path.splitext(os.path.basename(output_path))[0]
     outtmpl = os.path.join(out_dir, f"{out_base}.%(ext)s")
     ydl_opts = {
-        # Max 2K (1440p). Include webm for higher quality (YT serves 1440p as webm)
-        "format": "best[height<=1440][ext=mp4]/bestvideo[height<=1440]+bestaudio[ext=m4a]/best[height<=1440]",
+        # Video only (no audio needed for bg clips) - no merge, faster download
+        "format": "bestvideo[height<=1440]/best[height<=1440]",
         "outtmpl": outtmpl,
-        "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "max_filesize": 500 * 1024 * 1024,
+        "max_filesize": 5 * 1024 * 1024 * 1024,  # 5GB
         # Speed: concurrent fragment downloads (DASH/HLS)
         "concurrent_fragment_downloads": 8,
         "buffersize": 256 * 1024,  # 256KB in bytes
@@ -109,7 +108,9 @@ def cut_segments(
     output_files = []
     for i, start_time in enumerate(chosen_starts):
         end_time = start_time + duration
-        segment = clip.subclipped(start_time, end_time).without_audio()
+        segment = clip.subclipped(start_time, end_time)
+        if segment.audio is not None:
+            segment = segment.without_audio()
 
         filename = f"bg_{start_index + i:03d}.mp4"
         filepath = os.path.join(output_dir, filename)
