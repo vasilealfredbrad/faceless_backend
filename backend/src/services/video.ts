@@ -76,12 +76,12 @@ function runEncode(
 
   const outputFilename = path.basename(outputPath);
 
-  // GPU: decode → scale+crop via scale_vaapi → hwdownload → CPU: ass → GPU: hwupload → encode
-  // scale_vaapi handles both scale and crop: scales to fill 1080x1920, crops overflow
+  // Pipeline: GPU decode → GPU scale+crop (scale_vaapi) → hwdownload → CPU ass only → hwupload → GPU encode
+  // scale_vaapi does both scale-to-fill and center-crop in one GPU pass, eliminating CPU crop
   const filterComplex = [
-    `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2`,
+    `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2:out_range=full`,
+    `scale_vaapi=w=1080:h=1920`,
     `hwdownload,format=nv12`,
-    `crop=1080:1920`,
     `ass='${assPath}'`,
     `format=nv12,hwupload[v]`,
   ].join(",");
@@ -93,6 +93,7 @@ function runEncode(
     "-hwaccel", "vaapi",
     "-hwaccel_output_format", "vaapi",
     "-hwaccel_device", VAAPI_DEVICE,
+    "-extra_hw_frames", "64",
     "-i", bgPath,
     "-i", audioPath,
     "-filter_complex", filterComplex,
@@ -101,7 +102,7 @@ function runEncode(
     "-c:v", "h264_vaapi",
     "-qp", "18",
     "-bf", "0",
-    "-async_depth", "8",
+    "-async_depth", "64",
     "-compression_level", "0",
     "-profile:v", "high",
     "-level", "4.2",
