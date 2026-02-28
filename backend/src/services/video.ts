@@ -76,13 +76,23 @@ function runEncode(
 
   const outputFilename = path.basename(outputPath);
 
-  const filterComplex =
-    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,ass='${assPath}',format=nv12,hwupload[v]`;
+  // GPU: decode → scale+crop via scale_vaapi → hwdownload → CPU: ass → GPU: hwupload → encode
+  // scale_vaapi handles both scale and crop: scales to fill 1080x1920, crops overflow
+  const filterComplex = [
+    `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2`,
+    `hwdownload,format=nv12`,
+    `crop=1080:1920`,
+    `ass='${assPath}'`,
+    `format=nv12,hwupload[v]`,
+  ].join(",");
 
   const args = [
     "-y", "-hide_banner", "-loglevel", "error",
     "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
     "-filter_hw_device", "va",
+    "-hwaccel", "vaapi",
+    "-hwaccel_output_format", "vaapi",
+    "-hwaccel_device", VAAPI_DEVICE,
     "-i", bgPath,
     "-i", audioPath,
     "-filter_complex", filterComplex,

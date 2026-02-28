@@ -49,18 +49,21 @@ def cut_with_ffmpeg(
     input_path: str, start: float, duration: int,
     output_path: str,
 ) -> None:
-    """Cut a segment using FFmpeg with VAAPI GPU encoding."""
+    """Cut a segment using FFmpeg with full VAAPI GPU pipeline (decode+scale+encode)."""
     if not has_vaapi():
         raise RuntimeError(
             f"VAAPI device {VAAPI_DEVICE} not available. GPU encoding is required."
         )
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-vaapi_device", VAAPI_DEVICE,
+        "-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}",
+        "-hwaccel", "vaapi",
+        "-hwaccel_output_format", "vaapi",
+        "-hwaccel_device", VAAPI_DEVICE,
         "-ss", f"{start:.3f}", "-t", str(duration),
         "-i", input_path,
         "-an",
-        "-vf", "format=nv12,hwupload",
+        "-vf", "scale_vaapi=format=nv12",
         "-c:v", "h264_vaapi", "-qp", "18",
         "-movflags", "+faststart",
         output_path,
