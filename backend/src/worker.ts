@@ -243,16 +243,18 @@ export class Worker {
         jobId: job.id,
       });
 
-      // Step 6: Upload ALL files to B2 at once
+      // Step 6: Upload ALL files to B2 in parallel
       await this.updateJob(job.id, { status: "uploading" });
       const localVideoPath = path.join(GENERATED_DIR, videoFilename);
 
+      const uploadStart = Date.now();
       console.log(`[${job.id}] Uploading all assets to B2...`);
       const [audio_url, subtitles_url, video_url] = await Promise.all([
         uploadFile(audioPath, `jobs/${job.id}/audio.mp3`),
         uploadFile(assPath, `jobs/${job.id}/subtitles.ass`),
         uploadFile(localVideoPath, `jobs/${job.id}/video.mp4`),
       ]);
+      console.log(`[${job.id}] All uploads finished in ${((Date.now() - uploadStart) / 1000).toFixed(1)}s`);
 
       await this.updateJob(job.id, {
         status: "completed",

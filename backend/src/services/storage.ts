@@ -38,7 +38,7 @@ const s3 = new S3Client({
   }),
 });
 
-const SINGLE_UPLOAD_THRESHOLD = 10 * 1024 * 1024; // 10MB — use PutObject for small files
+const SINGLE_UPLOAD_THRESHOLD = 5 * 1024 * 1024; // 5MB — PutObject for small files, multipart above
 
 const MIME_TYPES: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -87,8 +87,8 @@ export async function uploadFile(
             Body: fs.createReadStream(localPath, { highWaterMark: 2 * 1024 * 1024 }),
             ContentType: contentType,
           },
-          queueSize: 10,
-          partSize: 8 * 1024 * 1024,
+          queueSize: 4,
+          partSize: 10 * 1024 * 1024,
           leavePartsOnError: false,
         });
         await upload.done();
