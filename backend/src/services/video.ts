@@ -76,11 +76,11 @@ function runEncode(
 
   const outputFilename = path.basename(outputPath);
 
-  // GPU decode → GPU scale+crop (2x scale_vaapi) → hwdownload → CPU ass → hwupload → GPU encode
+  // GPU decode → GPU scale (fill) → hwdownload → CPU crop + ass → hwupload → GPU encode
   const filterComplex = [
     `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2`,
-    `scale_vaapi=w=1080:h=1920`,
     `hwdownload,format=nv12`,
+    `crop=1080:1920`,
     `ass='${assPath}'`,
     `format=nv12,hwupload[v]`,
   ].join(",");
