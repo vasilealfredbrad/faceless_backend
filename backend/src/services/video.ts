@@ -108,7 +108,7 @@ function runEncode(
     "-r", "60",
     "-c:a", "aac", "-b:a", "192k",
     "-threads", "0",
-    "-filter_threads", "4",
+    "-filter_threads", "0",
     "-t", String(duration),
     "-movflags", "+faststart",
     outputPath,
