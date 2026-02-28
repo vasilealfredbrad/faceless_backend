@@ -106,7 +106,7 @@ export async function generateSubtitles(
   const events = buildDialogueEvents(groups);
 
   const ass = `[Script Info]
-Title: Faceless Video Subtitles
+Title: Invisible Creator Video Subtitles
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920

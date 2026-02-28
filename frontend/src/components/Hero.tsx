@@ -14,7 +14,7 @@ export default function Hero({ onStart }: HeroProps) {
         </div>
 
         <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-black leading-[1.05] tracking-tight mb-6">
-          Create Faceless Videos in{" "}
+          Create Videos in{" "}
           <span className="bg-gradient-to-r from-primary via-primary-light to-accent bg-clip-text text-transparent">
             One Click
           </span>

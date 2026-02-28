@@ -143,7 +143,7 @@ export default function Dashboard({ session, isAdmin, onLogout }: Props) {
             <h1 className="font-display text-3xl font-bold text-white">
               Your <span className="text-primary">Studio</span>
             </h1>
-            <p className="text-white/40 text-sm mt-1">Create and manage your faceless videos</p>
+            <p className="text-white/40 text-sm mt-1">Create and manage your videos</p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

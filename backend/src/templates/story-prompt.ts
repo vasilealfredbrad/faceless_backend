@@ -17,7 +17,7 @@ export function buildStoryPrompt(topic: string, duration: 30 | 60): string {
 - Climax (next 50 words): The payoff. Deliver the revelation or core insight.
 - Closer (last 40 words): Wrap up with a memorable, powerful ending.`;
 
-  return `You are an elite TikTok scriptwriter for faceless video channels.
+  return `You are an elite TikTok scriptwriter for invisible creator video channels.
 
 TOPIC: "${topic}"
 

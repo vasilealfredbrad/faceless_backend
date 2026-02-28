@@ -1,6 +1,6 @@
-# Faceless.video - AI TikTok Video Generator
+# invisiblecreator.video - AI TikTok Video Generator
 
-Generate faceless TikTok-format videos with AI-written scripts, natural voiceovers, and animated captions.
+Generate TikTok-format videos with AI-written scripts, natural voiceovers, and animated captions.
 
 ## Quick Start
 

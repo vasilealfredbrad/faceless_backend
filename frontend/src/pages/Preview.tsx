@@ -139,7 +139,7 @@ export default function Preview() {
             Back
           </Link>
           <span className="font-display text-lg font-bold text-white">
-            Faceless<span className="text-primary">.video</span>
+            Invisible Creator<span className="text-primary">.video</span>
           </span>
         </div>
       </nav>
@@ -178,7 +178,7 @@ export default function Preview() {
               <div className="flex gap-3">
                 <a
                   href={videoSrc}
-                  download={`faceless-${job.id}.mp4`}
+                  download={`invisiblecreator-${job.id}.mp4`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex-1 flex items-center justify-center gap-2 py-3 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"

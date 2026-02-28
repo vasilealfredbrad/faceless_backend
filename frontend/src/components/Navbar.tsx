@@ -19,7 +19,7 @@ export default function Navbar({ session, isAdmin, onLogin, onLogout }: NavbarPr
         <Link to="/" className="flex items-center gap-2">
           <Video className="w-7 h-7 text-primary" />
           <span className="font-display text-xl font-bold tracking-tight">
-            Faceless<span className="text-primary">.video</span>
+            Invisible Creator<span className="text-primary">.video</span>
           </span>
         </Link>
 

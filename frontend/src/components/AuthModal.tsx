@@ -24,7 +24,7 @@ export default function AuthModal({ onClose }: AuthModalProps) {
         </button>
 
         <h2 className="font-display text-2xl font-bold mb-6 text-center">
-          Welcome to <span className="text-primary">Faceless</span>
+          Welcome to <span className="text-primary">Invisible Creator</span>
         </h2>
 
         <Auth
