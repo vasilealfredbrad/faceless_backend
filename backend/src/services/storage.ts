@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
@@ -17,6 +17,12 @@ if (!B2_KEY_ID || !B2_APP_KEY || !B2_BUCKET_NAME) {
   console.warn("WARNING: Backblaze B2 credentials not fully configured. Uploads will fail.");
 }
 
+const httpsAgent = new Agent({
+  keepAlive: true,
+  maxSockets: 50,
+  maxFreeSockets: 10,
+});
+
 const s3 = new S3Client({
   endpoint: B2_ENDPOINT,
   region: B2_REGION,
@@ -26,14 +32,13 @@ const s3 = new S3Client({
   },
   forcePathStyle: true,
   requestHandler: new NodeHttpHandler({
-    httpsAgent: new Agent({
-      keepAlive: true,
-      maxSockets: 50,
-    }),
+    httpsAgent,
     connectionTimeout: 5_000,
-    socketTimeout: 30_000,
+    socketTimeout: 60_000,
   }),
 });
+
+const SINGLE_UPLOAD_THRESHOLD = 10 * 1024 * 1024; // 10MB — use PutObject for small files
 
 const MIME_TYPES: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -65,26 +70,36 @@ export async function uploadFile(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const uploadStart = Date.now();
-      const upload = new Upload({
-        client: s3,
-        params: {
+
+      if (stat.size <= SINGLE_UPLOAD_THRESHOLD) {
+        await s3.send(new PutObjectCommand({
           Bucket: B2_BUCKET_NAME,
           Key: remotePath,
-          Body: fs.createReadStream(localPath, { highWaterMark: 1024 * 1024 }),
+          Body: fs.readFileSync(localPath),
           ContentType: contentType,
-        },
-        queueSize: 8,
-        partSize: 5 * 1024 * 1024,
-        leavePartsOnError: false,
-      });
+        }));
+      } else {
+        const upload = new Upload({
+          client: s3,
+          params: {
+            Bucket: B2_BUCKET_NAME,
+            Key: remotePath,
+            Body: fs.createReadStream(localPath, { highWaterMark: 2 * 1024 * 1024 }),
+            ContentType: contentType,
+          },
+          queueSize: 10,
+          partSize: 8 * 1024 * 1024,
+          leavePartsOnError: false,
+        });
+        await upload.done();
+      }
 
-      await upload.done();
-
+      const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(1);
       uploadSizeBytes.observe({ file_type: fileType }, stat.size);
-      uploadDurationSeconds.observe({ file_type: fileType }, (Date.now() - uploadStart) / 1000);
+      uploadDurationSeconds.observe({ file_type: fileType }, parseFloat(elapsed));
 
       const signedUrl = await generateSignedUrl(remotePath);
-      console.log(`Uploaded ${path.basename(localPath)} (${sizeMB}MB) → ${remotePath}`);
+      console.log(`Uploaded ${path.basename(localPath)} (${sizeMB}MB) in ${elapsed}s → ${remotePath}`);
       return signedUrl;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
