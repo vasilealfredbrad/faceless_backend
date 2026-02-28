@@ -2,6 +2,7 @@ import { buildStoryPrompt } from "../templates/story-prompt.js";
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_RETRIES = 2;
 
 if (!GROQ_API_KEY) {
   console.warn("WARNING: GROQ_API_KEY not set. Script generation will fail.");
@@ -21,7 +22,12 @@ function sanitizeTopic(raw: string): string {
     .trim();
 }
 
-async function tryModel(model: string, prompt: string): Promise<string | null> {
+interface Message {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+async function callGroq(model: string, messages: Message[]): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -36,16 +42,9 @@ async function tryModel(model: string, prompt: string): Promise<string | null> {
         },
         body: JSON.stringify({
           model,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a viral TikTok scriptwriter. Output ONLY the raw spoken script. No titles, labels, or formatting.",
-            },
-            { role: "user", content: prompt },
-          ],
+          messages,
           temperature: 0.8,
-          max_tokens: 500,
+          max_tokens: 1024,
         }),
         signal: controller.signal,
       }
@@ -85,6 +84,10 @@ function cleanScript(raw: string): string {
     .trim();
 }
 
+function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
 export async function generateStory(
   topic: string,
   duration: 30 | 60
@@ -93,35 +96,58 @@ export async function generateStory(
   if (!safeTopic) throw new Error("Topic is empty after sanitization");
 
   const prompt = buildStoryPrompt(safeTopic, duration);
-  const minWords = duration === 30 ? 50 : 100;
-  const maxWords = duration === 30 ? 120 : 230;
+  const targetWords = duration === 30 ? 85 : 170;
+  const minWords = duration === 30 ? 70 : 140;
+  const maxWords = duration === 30 ? 100 : 200;
+
+  const systemMsg: Message = {
+    role: "system",
+    content:
+      "You are a viral TikTok scriptwriter. Output ONLY the raw spoken script. No titles, labels, or formatting. You MUST hit the exact word count specified in the prompt.",
+  };
 
   for (const model of MODELS) {
-    const raw = await tryModel(model, prompt);
-    if (!raw) continue;
+    let messages: Message[] = [systemMsg, { role: "user", content: prompt }];
 
-    const script = cleanScript(raw);
-    const words = script.split(/\s+/).filter(Boolean);
-    console.log(`Script from ${model}: ${words.length} words (range: ${minWords}-${maxWords})`);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const raw = await callGroq(model, messages);
+      if (!raw) break;
 
-    if (words.length < minWords) {
-      console.warn(`Too short (${words.length}), trying next model...`);
-      continue;
+      const script = cleanScript(raw);
+      const words = countWords(script);
+      console.log(`Script from ${model} (attempt ${attempt + 1}): ${words} words (need ${minWords}-${maxWords})`);
+
+      if (words >= minWords && words <= maxWords) {
+        return script;
+      }
+
+      if (words > maxWords) {
+        const wordArr = script.split(/\s+/).filter(Boolean);
+        const fullText = wordArr.join(" ");
+        const lastDot = wordArr.slice(0, maxWords).join(" ").lastIndexOf(".");
+        const cutoff = wordArr.slice(0, minWords).join(" ").length;
+        const trimmed =
+          lastDot > cutoff
+            ? fullText.slice(0, lastDot + 1)
+            : wordArr.slice(0, maxWords).join(" ");
+        console.warn(`Trimmed from ${words} to fit ${maxWords} max`);
+        return trimmed;
+      }
+
+      if (attempt < MAX_RETRIES) {
+        const shortage = targetWords - words;
+        console.warn(`Too short by ${shortage} words, retrying with feedback...`);
+        messages = [
+          systemMsg,
+          { role: "user", content: prompt },
+          { role: "assistant", content: raw },
+          {
+            role: "user",
+            content: `That was only ${words} words. I need EXACTLY ${targetWords} words (minimum ${minWords}). You are ${shortage} words short. Please rewrite the COMPLETE script with MORE detail, longer sentences, and additional examples to reach ${targetWords} words. Output ONLY the spoken script, no explanations.`,
+          },
+        ];
+      }
     }
-
-    if (words.length > maxWords) {
-      const fullText = words.join(" ");
-      const lastSentenceEnd = words.slice(0, maxWords).join(" ").lastIndexOf(".");
-      const cutoff = words.slice(0, minWords).join(" ").length;
-      const trimmed =
-        lastSentenceEnd > cutoff
-          ? fullText.slice(0, lastSentenceEnd + 1)
-          : words.slice(0, maxWords).join(" ");
-      console.warn(`Trimmed from ${words.length} words`);
-      return trimmed;
-    }
-
-    return script;
   }
 
   throw new Error("All AI models are currently unavailable. Please try again in a minute.");
