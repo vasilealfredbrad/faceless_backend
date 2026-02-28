@@ -5,6 +5,7 @@ export interface GenerateRequest {
   duration: 30 | 60;
   voice: string;
   background: string;
+  variations?: number;
 }
 
 export interface GenerateResponse {
@@ -36,10 +37,18 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   failed: "Failed",
 };
 
+export interface BulkProgress {
+  completed: number;
+  total: number;
+  step: string;
+}
+
 export async function generateVideo(
   req: GenerateRequest,
-  onProgress?: (step: string) => void
-): Promise<GenerateResponse> {
+  onProgress?: (step: string) => void,
+  onBulkProgress?: (progress: BulkProgress) => void,
+  onVariationComplete?: (result: GenerateResponse) => void,
+): Promise<GenerateResponse[]> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -52,74 +61,125 @@ export async function generateVideo(
   if (!req.voice) throw new Error("Voice is required");
   if (!req.background) throw new Error("Background is required");
 
-  const { data: job, error: insertError } = await supabase
-    .from("jobs")
-    .insert({
-      user_id: user.id,
-      topic,
-      duration: req.duration,
-      voice: req.voice,
-      background: req.background,
-      status: "pending",
-    })
-    .select()
-    .single();
+  const count = Math.max(1, Math.min(6, req.variations || 1));
 
-  if (insertError || !job) {
-    throw new Error(insertError?.message || "Failed to create job");
+  const rows = Array.from({ length: count }, () => ({
+    user_id: user.id,
+    topic,
+    duration: req.duration,
+    voice: req.voice,
+    background: req.background,
+    status: "pending" as const,
+  }));
+
+  const { data: jobs, error: insertError } = await supabase
+    .from("jobs")
+    .insert(rows)
+    .select();
+
+  if (insertError || !jobs || jobs.length === 0) {
+    throw new Error(insertError?.message || "Failed to create jobs");
   }
 
-  const jobId = job.id as string;
+  const jobIds = jobs.map((j) => j.id as string);
   if (onProgress) onProgress(STATUS_LABELS.pending);
 
-  return new Promise<GenerateResponse>((resolve, reject) => {
+  return new Promise<GenerateResponse[]>((resolve, reject) => {
     let settled = false;
+    const results = new Map<string, GenerateResponse>();
+    const statuses = new Map<string, JobStatus>();
+    const channels: ReturnType<typeof supabase.channel>[] = [];
 
-    const channel = supabase
-      .channel(`job-${jobId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "jobs",
-          filter: `id=eq.${jobId}`,
-        },
-        (payload) => {
-          if (settled) return;
-          const updated = payload.new as Record<string, unknown>;
-          const status = updated.status as JobStatus;
+    function cleanup() {
+      channels.forEach((ch) => supabase.removeChannel(ch));
+    }
 
-          if (onProgress) {
-            onProgress(STATUS_LABELS[status] || status);
-          }
+    function broadcastProgress() {
+      if (settled) return;
 
-          if (status === "completed") {
-            settled = true;
-            supabase.removeChannel(channel);
-            resolve({
-              jobId,
-              videoUrl: updated.video_url as string,
-              script: updated.script as string,
-            });
-          }
-
-          if (status === "failed") {
-            settled = true;
-            supabase.removeChannel(channel);
-            reject(new Error((updated.error as string) || "Video generation failed"));
-          }
+      let furthestStatus: JobStatus = "pending";
+      for (const s of statuses.values()) {
+        const order: JobStatus[] = [
+          "pending", "generating_script", "generating_voice",
+          "fitting_audio", "building_subtitles", "assembling_video",
+          "uploading", "completed",
+        ];
+        if (order.indexOf(s) > order.indexOf(furthestStatus)) {
+          furthestStatus = s;
         }
-      )
-      .subscribe();
+      }
 
+      if (onProgress) {
+        onProgress(STATUS_LABELS[furthestStatus] || furthestStatus);
+      }
+      if (onBulkProgress) {
+        onBulkProgress({
+          completed: results.size,
+          total: jobIds.length,
+          step: STATUS_LABELS[furthestStatus] || furthestStatus,
+        });
+      }
+    }
+
+    for (const jobId of jobIds) {
+      statuses.set(jobId, "pending");
+
+      const channel = supabase
+        .channel(`job-${jobId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "jobs",
+            filter: `id=eq.${jobId}`,
+          },
+          (payload) => {
+            if (settled) return;
+            const updated = payload.new as Record<string, unknown>;
+            const status = updated.status as JobStatus;
+            statuses.set(jobId, status);
+
+            if (status === "completed") {
+              const result: GenerateResponse = {
+                jobId,
+                videoUrl: updated.video_url as string,
+                script: updated.script as string,
+              };
+              results.set(jobId, result);
+              onVariationComplete?.(result);
+
+              if (results.size === jobIds.length) {
+                settled = true;
+                cleanup();
+                resolve(jobIds.map((id) => results.get(id)!));
+                return;
+              }
+            }
+
+            if (status === "failed") {
+              settled = true;
+              cleanup();
+              reject(new Error((updated.error as string) || "Video generation failed"));
+              return;
+            }
+
+            broadcastProgress();
+          }
+        )
+        .subscribe();
+
+      channels.push(channel);
+    }
+
+    const timeoutMs = count * 10 * 60 * 1000;
     setTimeout(() => {
       if (!settled) {
         settled = true;
-        supabase.removeChannel(channel);
+        cleanup();
         reject(new Error("Generation timed out. Check your jobs page for status."));
       }
-    }, 10 * 60 * 1000);
+    }, timeoutMs);
   });
 }
 

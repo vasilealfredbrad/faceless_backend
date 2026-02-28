@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Session } from "@supabase/supabase-js";
-import { generateVideo, GenerateRequest, getCategories, CategoryInfo } from "../lib/api";
+import { generateVideo, GenerateRequest, getCategories, CategoryInfo, BulkProgress } from "../lib/api";
 import {
   Wand2,
   Download,
@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Circle,
   Loader2,
+  Layers,
 } from "lucide-react";
 
 const VOICES = [
@@ -58,6 +59,7 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
   const [duration, setDuration] = useState<30 | 60>(30);
   const [voice, setVoice] = useState("Noah");
   const [background, setBackground] = useState("minecraft");
+  const [variations, setVariations] = useState(1);
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
@@ -67,6 +69,7 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
   const [endTime, setEndTime] = useState(0);
   const [showPipeline, setShowPipeline] = useState(false);
   const [pipelineComplete, setPipelineComplete] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
 
   useEffect(() => {
     getCategories()
@@ -100,28 +103,36 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
     setStepTimers({});
     setShowPipeline(true);
     setPipelineComplete(false);
+    setBulkProgress(null);
     setEndTime(0);
     const now = Date.now();
     setStartTime(now);
 
     try {
-      const req: GenerateRequest = { topic, duration, voice, background };
-      const result = await generateVideo(req, (step) => {
-        setProgress(step);
-        const stepIdx = getActiveStep(step);
-        if (stepIdx >= 0) {
-          setStepTimers((prev) => {
-            const updated = { ...prev };
-            if (!(stepIdx in updated)) {
-              updated[stepIdx] = Date.now();
-            }
-            return updated;
-          });
-        }
-      });
+      const req: GenerateRequest = { topic, duration, voice, background, variations };
+      const results = await generateVideo(
+        req,
+        (step) => {
+          setProgress(step);
+          const stepIdx = getActiveStep(step);
+          if (stepIdx >= 0) {
+            setStepTimers((prev) => {
+              const updated = { ...prev };
+              if (!(stepIdx in updated)) {
+                updated[stepIdx] = Date.now();
+              }
+              return updated;
+            });
+          }
+        },
+        (bp) => setBulkProgress(bp),
+        (result) => onVideoGenerated?.(result.jobId, result.videoUrl, result.script),
+      );
       setEndTime(Date.now());
       setPipelineComplete(true);
-      onVideoGenerated?.(result.jobId, result.videoUrl, result.script);
+      if (results.length === 1) {
+        onVideoGenerated?.(results[0].jobId, results[0].videoUrl, results[0].script);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
       setShowPipeline(false);
@@ -202,6 +213,34 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
 
         <div>
           <label className="flex items-center gap-2 text-sm font-medium text-white/70 mb-2">
+            <Layers className="w-4 h-4" />
+            Variations
+          </label>
+          <div className="flex rounded-xl overflow-hidden border border-white/10">
+            {[1, 2, 4, 6].map((v) => (
+              <button
+                key={v}
+                onClick={() => setVariations(v)}
+                disabled={loading}
+                className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
+                  variations === v
+                    ? "bg-primary text-white"
+                    : "bg-surface text-white/40 hover:text-white/60"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-white/25 mt-1.5">
+            {variations === 1
+              ? "Single video"
+              : `${variations} unique scripts from the same topic`}
+          </p>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-white/70 mb-2">
             <Mic className="w-4 h-4" />
             Voice
           </label>
@@ -231,12 +270,14 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
           {loading ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              Generating...
+              {variations > 1 && bulkProgress
+                ? `Generating ${bulkProgress.completed}/${bulkProgress.total}...`
+                : "Generating..."}
             </>
           ) : (
             <>
               <Wand2 className="w-5 h-5" />
-              CREATE VIDEO
+              {variations > 1 ? `CREATE ${variations} VIDEOS` : "CREATE VIDEO"}
             </>
           )}
         </button>
@@ -252,7 +293,11 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
         <div className="rounded-2xl bg-surface-card border border-white/5 p-5 space-y-1">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-white/40">
-              {pipelineComplete ? "Complete!" : "Pipeline Progress"}
+              {pipelineComplete
+                ? "Complete!"
+                : variations > 1 && bulkProgress
+                  ? `Video ${bulkProgress.completed + 1} of ${bulkProgress.total}`
+                  : "Pipeline Progress"}
             </span>
             <span className="text-xs font-mono text-white/30">
               {formatElapsed((endTime || Date.now()) - startTime)}
@@ -319,7 +364,15 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
           <div className="mt-3 h-1.5 rounded-full bg-white/5 overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-500 ease-out"
-              style={{ width: `${pipelineComplete ? 100 : Math.max(5, ((activeStep + 1) / PIPELINE_STEPS.length) * 100)}%` }}
+              style={{
+                width: `${
+                  pipelineComplete
+                    ? 100
+                    : variations > 1 && bulkProgress
+                      ? Math.max(5, ((bulkProgress.completed + (activeStep + 1) / PIPELINE_STEPS.length) / bulkProgress.total) * 100)
+                      : Math.max(5, ((activeStep + 1) / PIPELINE_STEPS.length) * 100)
+                }%`,
+              }}
             />
           </div>
         </div>
