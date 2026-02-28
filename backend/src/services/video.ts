@@ -61,7 +61,37 @@ function pickRandomBackground(category: string, duration: 30 | 60): string {
   return path.join(dir, pick);
 }
 
-function runEncode(
+function spawnFFmpeg(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", args);
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`FFmpeg exited ${code}: ${stderr.slice(-500)}`));
+    });
+    proc.on("error", (err) => reject(new Error(`FFmpeg spawn: ${err.message}`)));
+  });
+}
+
+function preRenderSubtitles(
+  assPath: string,
+  duration: number,
+  outputPath: string,
+): Promise<void> {
+  const args = [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-f", "lavfi", "-i", `color=c=black@0:s=1080x1920:d=${duration}:r=60,format=yuva420p`,
+    "-vf", `ass='${assPath}'`,
+    "-c:v", "rawvideo", "-pix_fmt", "yuva420p",
+    "-threads", "10",
+    "-t", String(duration),
+    outputPath,
+  ];
+  return spawnFFmpeg(args);
+}
+
+async function runEncode(
   bgPath: string,
   audioPath: string,
   assPath: string,
@@ -75,67 +105,60 @@ function runEncode(
   }
 
   const outputFilename = path.basename(outputPath);
+  const subsVideoPath = outputPath.replace(/\.mp4$/, "_subs.nut");
 
-  // Pipeline: GPU decode → GPU scale+crop (scale_vaapi) → hwdownload → CPU ass only → hwupload → GPU encode
-  // scale_vaapi does both scale-to-fill and center-crop in one GPU pass, eliminating CPU crop
-  const filterComplex = [
-    `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2:out_range=full`,
-    `scale_vaapi=w=1080:h=1920`,
-    `hwdownload,format=nv12`,
-    `ass='${assPath}'`,
-    `format=nv12,hwupload[v]`,
-  ].join(",");
+  try {
+    // Step 1: Pre-render subtitles to raw video with alpha (CPU — text only, very fast)
+    console.log("[video] Pre-rendering subtitles...");
+    const t0 = Date.now();
+    await preRenderSubtitles(assPath, duration, subsVideoPath);
+    console.log(`[video] Subtitles pre-rendered in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-  const args = [
-    "-y", "-hide_banner", "-loglevel", "error",
-    "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
-    "-filter_hw_device", "va",
-    "-hwaccel", "vaapi",
-    "-hwaccel_output_format", "vaapi",
-    "-hwaccel_device", VAAPI_DEVICE,
-    "-extra_hw_frames", "64",
-    "-i", bgPath,
-    "-i", audioPath,
-    "-filter_complex", filterComplex,
-    "-map", "[v]",
-    "-map", "1:a",
-    "-c:v", "h264_vaapi",
-    "-qp", "18",
-    "-bf", "0",
-    "-async_depth", "64",
-    "-compression_level", "0",
-    "-profile:v", "high",
-    "-level", "4.2",
-    "-r", "60",
-    "-c:a", "aac", "-b:a", "192k",
-    "-threads", "10",
-    "-filter_threads", "10",
-    "-t", String(duration),
-    "-movflags", "+faststart",
-    outputPath,
-  ];
+    // Step 2: Full GPU pipeline — decode bg, scale+crop, overlay subs, encode
+    // overlay_vaapi composites subtitle video on top of background entirely on GPU
+    const filterComplex = [
+      `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2,scale_vaapi=w=1080:h=1920[bg]`,
+      `[1:v]format=nv12,hwupload[subs]`,
+      `[bg][subs]overlay_vaapi=x=0:y=0[v]`,
+    ].join(";");
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn("ffmpeg", args);
-    let stderr = "";
+    const args = [
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
+      "-filter_hw_device", "va",
+      "-hwaccel", "vaapi",
+      "-hwaccel_output_format", "vaapi",
+      "-hwaccel_device", VAAPI_DEVICE,
+      "-extra_hw_frames", "64",
+      "-i", bgPath,
+      "-i", subsVideoPath,
+      "-i", audioPath,
+      "-filter_complex", filterComplex,
+      "-map", "[v]",
+      "-map", "2:a",
+      "-c:v", "h264_vaapi",
+      "-qp", "18",
+      "-bf", "0",
+      "-async_depth", "64",
+      "-compression_level", "0",
+      "-profile:v", "high",
+      "-level", "4.2",
+      "-r", "60",
+      "-c:a", "aac", "-b:a", "192k",
+      "-t", String(duration),
+      "-movflags", "+faststart",
+      outputPath,
+    ];
 
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
+    const t1 = Date.now();
+    await spawnFFmpeg(args);
+    console.log(`[video] GPU encode finished in ${((Date.now() - t1) / 1000).toFixed(1)}s`);
+    console.log("[video] Encoded with VAAPI (GPU) — full GPU pipeline");
 
-    proc.on("close", (code) => {
-      if (code === 0) {
-        console.log("[video] Encoded with VAAPI (GPU)");
-        resolve(outputFilename);
-      } else {
-        reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
-      }
-    });
-
-    proc.on("error", (err) => {
-      reject(new Error(`FFmpeg spawn error: ${err.message}`));
-    });
-  });
+    return outputFilename;
+  } finally {
+    if (fs.existsSync(subsVideoPath)) fs.unlinkSync(subsVideoPath);
+  }
 }
 
 export async function assembleVideo(
