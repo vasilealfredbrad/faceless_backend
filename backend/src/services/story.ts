@@ -97,7 +97,7 @@ export async function generateStory(
 
   const prompt = buildStoryPrompt(safeTopic, duration);
   const targetWords = duration === 30 ? 85 : 170;
-  const minWords = duration === 30 ? 70 : 140;
+  const minWords = duration === 30 ? 82 : 140;
   const maxWords = duration === 30 ? 100 : 200;
 
   const systemMsg: Message = {
