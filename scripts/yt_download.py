@@ -64,7 +64,11 @@ def cut_with_ffmpeg(
         "-i", input_path,
         "-an",
         "-vf", "scale_vaapi=format=nv12",
-        "-c:v", "h264_vaapi", "-qp", "18",
+        "-c:v", "h264_vaapi",
+        "-qp", "20",
+        "-bf", "0",
+        "-async_depth", "4",
+        "-compression_level", "2",
         "-movflags", "+faststart",
         output_path,
     ]
