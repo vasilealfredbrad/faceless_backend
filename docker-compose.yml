@@ -18,9 +18,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: 16G
+          cpus: "10.0"
         reservations:
-          memory: 512M
+          memory: 1G
     networks:
       - internal
       - monitoring
