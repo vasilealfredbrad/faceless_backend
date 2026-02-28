@@ -12,7 +12,7 @@ cp .env.example .env
 
 Fill in your API keys:
 
-- **OPENROUTER_API_KEY** - Get from [openrouter.ai](https://openrouter.ai)
+- **GROQ_API_KEY** - Get from [console.groq.com](https://console.groq.com)
 - **UNREALSPEECH_API_KEY** - Get from [unrealspeech.com](https://unrealspeech.com) (format: `Bearer your-key`)
 - **SUPABASE_URL** / **SUPABASE_ANON_KEY** / **SUPABASE_SERVICE_ROLE_KEY** - From your [Supabase](https://supabase.com) project
 
@@ -50,7 +50,7 @@ Frontend runs on `:5173` with proxy to backend on `:3000`.
 ## How It Works
 
 1. User enters a topic, selects duration (30s/60s), voice, and background
-2. AI generates a viral TikTok script via OpenRouter (Llama 3.3 70B)
+2. AI generates a viral TikTok script via Groq (Llama 3.3 70B)
 3. Unreal Speech v8 creates a natural voiceover with word-level timestamps
 4. ASS subtitles are generated with TikTok-style word highlighting
 5. FFmpeg assembles the background video + audio + subtitles into a 1080x1920 MP4
@@ -59,6 +59,6 @@ Frontend runs on `:5173` with proxy to backend on `:3000`.
 
 - **Frontend**: React, Vite, TailwindCSS v4, Supabase Auth UI
 - **Backend**: Express, TypeScript, FFmpeg
-- **AI**: OpenRouter (Llama 3.3 70B free), Unreal Speech v8
+- **AI**: Groq (Llama 3.3 70B), Unreal Speech v8
 - **Auth**: Supabase
 - **Deploy**: Docker

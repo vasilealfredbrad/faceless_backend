@@ -1,18 +1,16 @@
 import { buildStoryPrompt } from "../templates/story-prompt.js";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const REQUEST_TIMEOUT_MS = 30_000;
 
-if (!OPENROUTER_API_KEY) {
-  console.warn("WARNING: OPENROUTER_API_KEY not set. Script generation will fail.");
+if (!GROQ_API_KEY) {
+  console.warn("WARNING: GROQ_API_KEY not set. Script generation will fail.");
 }
 
-const FREE_MODELS = [
-  "arcee-ai/trinity-large-preview:free",
-  "nvidia/nemotron-nano-9b-v2:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "stepfun/step-3.5-flash:free",
-  "z-ai/glm-4.5-air:free",
+const MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "openai/gpt-oss-20b",
 ];
 
 function sanitizeTopic(raw: string): string {
@@ -29,14 +27,12 @@ async function tryModel(model: string, prompt: string): Promise<string | null> {
 
   try {
     const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
+      "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${GROQ_API_KEY}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://faceless.video",
-          "X-Title": "Faceless Video Generator",
         },
         body: JSON.stringify({
           model,
@@ -100,7 +96,7 @@ export async function generateStory(
   const minWords = duration === 30 ? 50 : 100;
   const maxWords = duration === 30 ? 120 : 230;
 
-  for (const model of FREE_MODELS) {
+  for (const model of MODELS) {
     const raw = await tryModel(model, prompt);
     if (!raw) continue;
 

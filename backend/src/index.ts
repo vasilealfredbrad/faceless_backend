@@ -9,7 +9,7 @@ import { youtubeRoute } from "./routes/youtube.js";
 import { generateSignedUrl } from "./services/storage.js";
 import { register, httpRequestsTotal, httpRequestDuration } from "./services/metrics.js";
 
-const requiredEnv = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "OPENROUTER_API_KEY", "UNREALSPEECH_API_KEY"];
+const requiredEnv = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "GROQ_API_KEY", "UNREALSPEECH_API_KEY"];
 for (const key of requiredEnv) {
   if (!process.env[key]) {
     console.error(`FATAL: Missing required env var: ${key}`);

@@ -296,7 +296,7 @@ export class Worker {
 function sanitizeErrorMessage(raw: string): string {
   const safePatterns: Record<string, string> = {
     "Unreal Speech API error": "Voice generation failed",
-    "OpenRouter": "Script generation failed",
+    "Groq": "Script generation failed",
     "Upload failed": "Cloud upload failed",
     "ffprobe": "Audio processing failed",
     "FFmpeg": "Video processing failed",
