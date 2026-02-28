@@ -1,6 +1,8 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import { Agent } from "https";
 import fs from "fs";
 import path from "path";
 import { uploadSizeBytes, uploadDurationSeconds } from "./metrics.js";
@@ -23,6 +25,14 @@ const s3 = new S3Client({
     secretAccessKey: B2_APP_KEY,
   },
   forcePathStyle: true,
+  requestHandler: new NodeHttpHandler({
+    httpsAgent: new Agent({
+      keepAlive: true,
+      maxSockets: 50,
+    }),
+    connectionTimeout: 5_000,
+    socketTimeout: 30_000,
+  }),
 });
 
 const MIME_TYPES: Record<string, string> = {
@@ -60,11 +70,11 @@ export async function uploadFile(
         params: {
           Bucket: B2_BUCKET_NAME,
           Key: remotePath,
-          Body: fs.createReadStream(localPath),
+          Body: fs.createReadStream(localPath, { highWaterMark: 1024 * 1024 }),
           ContentType: contentType,
         },
-        queueSize: 4,
-        partSize: 10 * 1024 * 1024, // 10MB parts
+        queueSize: 8,
+        partSize: 5 * 1024 * 1024,
         leavePartsOnError: false,
       });
 
