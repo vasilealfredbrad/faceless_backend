@@ -44,7 +44,7 @@ const MIME_TYPES: Record<string, string> = {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
-const SIGNED_URL_EXPIRY = 3600; // 1 hour
+const SIGNED_URL_EXPIRY = 604800; // 7 days (maximum for S3-compatible)
 
 export async function uploadFile(
   localPath: string,
@@ -97,6 +97,10 @@ export async function uploadFile(
   }
 
   throw new Error(`Upload failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+}
+
+export function getPublicUrl(remotePath: string): string {
+  return `${B2_ENDPOINT}/${B2_BUCKET_NAME}/${remotePath}`;
 }
 
 export async function generateSignedUrl(remotePath: string): Promise<string> {

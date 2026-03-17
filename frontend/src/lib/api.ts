@@ -192,6 +192,7 @@ export interface JobRecord {
   background: string;
   script: string | null;
   video_url: string | null;
+  thumbnail_url: string | null;
   audio_url: string | null;
   subtitles_url: string | null;
   error: string | null;
@@ -200,9 +201,13 @@ export interface JobRecord {
 }
 
 export async function getUserJobs(): Promise<JobRecord[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
   const { data, error } = await supabase
     .from("jobs")
     .select("*")
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -216,7 +221,8 @@ export async function getSignedVideoUrl(jobId: string): Promise<string | null> {
     if (session?.access_token) {
       headers["Authorization"] = `Bearer ${session.access_token}`;
     }
-    const res = await fetch(`/api/signed-url?jobId=${encodeURIComponent(jobId)}&file=video.mp4`, { headers });
+    const base = BACKEND_URL || "";
+    const res = await fetch(`${base}/api/signed-url/${encodeURIComponent(jobId)}/video.mp4`, { headers });
     if (!res.ok) return null;
     const data = await res.json();
     return data.url || null;
@@ -231,7 +237,7 @@ export interface CategoryInfo {
   clips60: number;
 }
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
+export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
 
 export async function getCategories(): Promise<CategoryInfo[]> {
   if (!BACKEND_URL) return [];
@@ -251,6 +257,222 @@ export interface YouTubeDownloadRequest {
   duration: 30 | 60;
   clips: number;
 }
+
+// ---- Stripe ----
+
+export async function createStripeCheckout(plan: "starter" | "growth" | "creator"): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${BACKEND_URL}/api/stripe/checkout`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ plan }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Checkout failed" }));
+    throw new Error(err.error || "Checkout failed");
+  }
+
+  const data = await res.json();
+  return data.url;
+}
+
+export async function createStripePortal(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${BACKEND_URL}/api/stripe/portal`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.access_token}`,
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Portal failed" }));
+    throw new Error(err.error || "Portal failed");
+  }
+
+  const data = await res.json();
+  return data.url;
+}
+
+// ---- Profile ----
+
+export interface UserProfile {
+  id: string;
+  tier: string;
+  is_admin: boolean;
+  daily_videos_used: number;
+  daily_videos_reset_at: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+}
+
+export async function getMyProfile(): Promise<UserProfile | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .single();
+
+  if (error || !data) return null;
+  return data as UserProfile;
+}
+
+export async function getPublicSettings(): Promise<Record<string, string>> {
+  const { data, error } = await supabase.from("app_settings").select("*");
+  if (error) return {};
+
+  const settings: Record<string, string> = {};
+  for (const row of data || []) {
+    settings[row.key] = row.value;
+  }
+  return settings;
+}
+
+// ---- Admin settings ----
+
+export async function getAdminSettings(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${BACKEND_URL}/api/admin/settings`, {
+    headers: { "Authorization": `Bearer ${session.access_token}` },
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch settings");
+  const data = await res.json();
+  return data.settings || {};
+}
+
+export async function updateAdminSettings(settings: Record<string, string>): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${BACKEND_URL}/api/admin/settings`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ settings }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Update failed" }));
+    throw new Error(err.error || "Update failed");
+  }
+}
+
+// ---- Source Videos ----
+
+export interface SourceClip {
+  id: string;
+  clip_duration: number;
+  filename: string;
+  start_time: number | null;
+  times_used: number;
+  created_at: string;
+}
+
+export interface SourceVideo {
+  id: string;
+  youtube_url: string;
+  youtube_id: string | null;
+  title: string | null;
+  category: string;
+  source_path: string | null;
+  duration_seconds: number | null;
+  status: string;
+  error: string | null;
+  created_at: string;
+  source_clips: SourceClip[];
+}
+
+export async function getSourceVideos(): Promise<SourceVideo[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data, error } = await supabase
+    .from("source_videos")
+    .select("*, source_clips(id, clip_duration, filename, start_time, times_used, created_at)")
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return (data || []) as SourceVideo[];
+}
+
+export interface ReprocessRequest {
+  duration: 30 | 60;
+  clips: number;
+}
+
+export async function reprocessSourceVideo(
+  sourceId: string,
+  req: ReprocessRequest,
+  onProgress?: (step: string) => void
+): Promise<{ count: number; files: string[] }> {
+  if (!BACKEND_URL) throw new Error("Backend URL not configured");
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated");
+
+  const res = await fetch(`${BACKEND_URL}/api/youtube/reprocess/${sourceId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ duration: req.duration, clips: req.clips }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Reprocess failed" }));
+    throw new Error(err.error || "Reprocess failed");
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response stream");
+
+  const decoder = new TextDecoder();
+  let lastResult: { count: number; files: string[] } | null = null;
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const parsed = JSON.parse(line.slice(6));
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.step && onProgress) onProgress(parsed.step);
+        if (parsed.count !== undefined) lastResult = parsed;
+      } catch (e) {
+        if (e instanceof SyntaxError) continue;
+        if (e instanceof Error && e.message !== "Unexpected end of JSON input") throw e;
+      }
+    }
+  }
+
+  if (lastResult) return lastResult;
+  throw new Error("No result received");
+}
+
+// ---- YouTube Download ----
 
 export async function downloadYouTubeBackground(
   req: YouTubeDownloadRequest,
@@ -292,21 +514,24 @@ export async function downloadYouTubeBackground(
 
   const decoder = new TextDecoder();
   let lastResult: { count: number; files: string[] } | null = null;
+  let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split("\n").filter((l) => l.startsWith("data: "));
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
     for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
       try {
         const parsed = JSON.parse(line.slice(6));
         if (parsed.error) throw new Error(parsed.error);
         if (parsed.step && onProgress) onProgress(parsed.step);
         if (parsed.count !== undefined) lastResult = parsed;
       } catch (e) {
-        if (e instanceof Error && e.message !== "Unexpected end of JSON input")
-          throw e;
+        if (e instanceof SyntaxError) continue;
+        if (e instanceof Error && e.message !== "Unexpected end of JSON input") throw e;
       }
     }
   }

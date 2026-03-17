@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Session } from "@supabase/supabase-js";
 import VideoGenerator from "../components/VideoGenerator";
 import Navbar from "../components/Navbar";
-import { getUserJobs, getSignedVideoUrl, JobRecord } from "../lib/api";
+import { getUserJobs, getSignedVideoUrl, getMyProfile, JobRecord, UserProfile, getPublicSettings } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import {
   Play,
@@ -17,6 +17,12 @@ import {
   XCircle,
   RefreshCw,
   Video,
+  ArrowUpRight,
+  Info,
+  X,
+  Mic,
+  MonitorPlay,
+  FileText,
 } from "lucide-react";
 
 interface Props {
@@ -41,7 +47,6 @@ function StatusBadge({ status }: { status: string }) {
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
   const Icon = config.icon;
   const isAnimated = !["completed", "failed"].includes(status);
-
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${config.color}`}>
       <Icon className={`w-3 h-3 ${isAnimated ? "animate-spin" : ""}`} />
@@ -50,19 +55,285 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function VideoCard({
+  job,
+  onClick,
+  onShowInfo,
+}: {
+  job: JobRecord;
+  onClick: () => void;
+  onShowInfo: () => void;
+}) {
+  const isCompleted = job.status === "completed";
+  const [imgLoaded, setImgLoaded] = useState(false);
+
+  const dateStr = new Date(job.created_at).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  const timeStr = new Date(job.created_at).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return (
+    <div className="group">
+      <div
+        onClick={onClick}
+        className="relative aspect-[9/16] rounded-xl overflow-hidden border border-white/10 hover:border-white/25 cursor-pointer transition-all bg-surface"
+      >
+        {isCompleted && job.thumbnail_url ? (
+          <>
+            <img
+              src={job.thumbnail_url}
+              alt={job.topic}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onLoad={() => setImgLoaded(true)}
+            />
+            {!imgLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-5 h-5 text-white/20 animate-spin" />
+              </div>
+            )}
+          </>
+        ) : isCompleted ? (
+          <div className="w-full h-full flex items-center justify-center">
+            <Film className="w-8 h-8 text-white/10" />
+          </div>
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-3">
+            <StatusBadge status={job.status} />
+            <p className="text-[10px] text-white/30 text-center truncate w-full">{job.topic}</p>
+            {job.status === "failed" && job.error && (
+              <p className="text-[9px] text-red-400/60 text-center line-clamp-2">{job.error}</p>
+            )}
+          </div>
+        )}
+
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent pointer-events-none" />
+        <div className="absolute bottom-2 left-2 right-2">
+          <p className="text-[11px] text-white font-medium truncate">{job.topic}</p>
+          <p className="text-[10px] text-white/50">{job.duration}s &middot; {job.voice}</p>
+        </div>
+        {isCompleted && (
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-end gap-1 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => { e.stopPropagation(); onShowInfo(); }}
+              className="w-7 h-7 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-primary hover:bg-black/80 transition-colors"
+              title="Details"
+            >
+              <Info className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        {isCompleted && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
+              <Play className="w-5 h-5 text-white ml-0.5" />
+            </div>
+          </div>
+        )}
+      </div>
+      <p className="mt-1.5 px-0.5 text-[11px] text-white/30">{dateStr} &middot; {timeStr}</p>
+    </div>
+  );
+}
+
+function VideoPlayerModal({
+  job,
+  videoUrl,
+  loading,
+  onClose,
+  initialShowDetails = false,
+}: {
+  job: JobRecord;
+  videoUrl: string | null;
+  loading: boolean;
+  onClose: () => void;
+  initialShowDetails?: boolean;
+}) {
+  const [showDetails, setShowDetails] = useState(initialShowDetails);
+  const [playing, setPlaying] = useState(false);
+  const modalVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!playing || !videoUrl) return;
+    const vid = modalVideoRef.current;
+    if (!vid) return;
+    vid.muted = true;
+    const p = vid.play();
+    if (p) p.then(() => { vid.muted = false; }).catch(() => {});
+  }, [playing, videoUrl]);
+
+  const handlePlay = () => {
+    if (!videoUrl && !loading) return;
+    setPlaying(true);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="relative flex flex-col items-center max-h-[95vh] w-full max-w-md">
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute -top-2 -right-2 z-10 w-9 h-9 rounded-full bg-surface-card border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors shadow-xl"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {/* Video / Thumbnail */}
+        <div className="w-full rounded-2xl overflow-hidden bg-black border border-white/10 shadow-2xl">
+          {playing && videoUrl ? (
+            <video
+              ref={modalVideoRef}
+              key={videoUrl}
+              src={videoUrl}
+              controls
+              playsInline
+              className="w-full"
+              style={{ aspectRatio: "9/16" }}
+            />
+          ) : loading ? (
+            <div className="aspect-[9/16] flex items-center justify-center">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            </div>
+          ) : job.thumbnail_url ? (
+            <div className="relative cursor-pointer" onClick={handlePlay}>
+              <img
+                src={job.thumbnail_url}
+                alt={job.topic}
+                className="w-full"
+                style={{ aspectRatio: "9/16", objectFit: "cover" }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-16 h-16 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center hover:bg-black/70 transition-colors">
+                  <Play className="w-8 h-8 text-white ml-1" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="aspect-[9/16] flex items-center justify-center cursor-pointer" onClick={handlePlay}>
+              <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors">
+                <Play className="w-8 h-8 text-white ml-1" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom bar */}
+        <div className="w-full mt-3 flex items-center gap-2">
+          {videoUrl && (
+            <a
+              href={videoUrl}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"
+            >
+              <Download className="w-4 h-4" />
+              Download
+            </a>
+          )}
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-colors ${
+              showDetails
+                ? "bg-primary/20 text-primary border border-primary/30"
+                : "bg-white/5 hover:bg-white/10 text-white/60"
+            }`}
+          >
+            <Info className="w-4 h-4" />
+            Details
+          </button>
+          <Link
+            to={`/preview/${job.id}`}
+            target="_blank"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white/60 font-semibold rounded-xl transition-colors text-sm"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </Link>
+        </div>
+
+        {/* Expandable details panel */}
+        {showDetails && (
+          <div className="w-full mt-3 rounded-2xl bg-surface-card border border-white/10 p-4 space-y-3 overflow-y-auto max-h-[40vh]">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-surface border border-white/5 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] text-white/30 uppercase tracking-wider mb-1">
+                  <Clock className="w-3 h-3" /> Duration
+                </div>
+                <p className="text-sm font-semibold text-white">{job.duration}s</p>
+              </div>
+              <div className="rounded-xl bg-surface border border-white/5 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] text-white/30 uppercase tracking-wider mb-1">
+                  <Mic className="w-3 h-3" /> Voice
+                </div>
+                <p className="text-sm font-semibold text-white">{job.voice}</p>
+              </div>
+              <div className="rounded-xl bg-surface border border-white/5 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] text-white/30 uppercase tracking-wider mb-1">
+                  <MonitorPlay className="w-3 h-3" /> Background
+                </div>
+                <p className="text-sm font-semibold text-white">{job.background}</p>
+              </div>
+              <div className="rounded-xl bg-surface border border-white/5 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] text-white/30 uppercase tracking-wider mb-1">
+                  <Clock className="w-3 h-3" /> Created
+                </div>
+                <p className="text-xs text-white">
+                  {new Date(job.created_at).toLocaleDateString(undefined, {
+                    month: "short", day: "numeric", year: "numeric",
+                    hour: "2-digit", minute: "2-digit",
+                  })}
+                </p>
+              </div>
+            </div>
+            {job.script && (
+              <div className="rounded-xl bg-surface border border-white/5 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] text-white/30 uppercase tracking-wider mb-2">
+                  <FileText className="w-3 h-3" /> Script
+                </div>
+                <p className="text-sm text-white/60 leading-relaxed whitespace-pre-wrap">{job.script}</p>
+              </div>
+            )}
+            {job.status === "failed" && job.error && (
+              <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] text-red-400/60 uppercase tracking-wider mb-1">
+                  <AlertCircle className="w-3 h-3" /> Error
+                </div>
+                <p className="text-sm text-red-400">{job.error}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard({ session, isAdmin, onLogout }: Props) {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
-  const [previewJobId, setPreviewJobId] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewScript, setPreviewScript] = useState<string | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [appSettings, setAppSettings] = useState<Record<string, string>>({});
+
+  const [popupJob, setPopupJob] = useState<JobRecord | null>(null);
+  const [popupUrl, setPopupUrl] = useState<string | null>(null);
+  const [popupLoading, setPopupLoading] = useState(false);
+  const [popupShowDetails, setPopupShowDetails] = useState(false);
 
   useEffect(() => {
     if (!session) {
       navigate("/", { replace: true });
+      return;
     }
+    getMyProfile().then(setProfile).catch(() => {});
+    getPublicSettings().then(setAppSettings).catch(() => {});
   }, [session, navigate]);
 
   const fetchJobs = useCallback(async () => {
@@ -82,49 +353,45 @@ export default function Dashboard({ session, isAdmin, onLogout }: Props) {
   }, [session, fetchJobs]);
 
   useEffect(() => {
-    if (!session) return;
-
+    if (!session?.user?.id) return;
     const channel = supabase
       .channel("dashboard-jobs")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "jobs" },
-        () => {
-          fetchJobs();
-        }
+        {
+          event: "*",
+          schema: "public",
+          table: "jobs",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        () => { fetchJobs(); }
       )
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [session, fetchJobs]);
 
-  const handleSelectJob = useCallback(async (job: JobRecord) => {
-    if (job.status !== "completed") return;
-    setPreviewJobId(job.id);
-    setPreviewScript(job.script);
-    setPreviewLoading(true);
-    setPreviewUrl(null);
-
-    const url = await getSignedVideoUrl(job.id);
-    setPreviewUrl(url || job.video_url);
-    setPreviewLoading(false);
-  }, []);
-
-  const handleVideoGenerated = useCallback(async (jobId: string, videoUrl: string, script: string) => {
-    setPreviewJobId(jobId);
-    setPreviewUrl(videoUrl);
-    setPreviewScript(script);
+  const handleVideoGenerated = useCallback(async () => {
     fetchJobs();
   }, [fetchJobs]);
 
-  useEffect(() => {
-    if (jobs.length > 0 && !previewJobId) {
-      const latest = jobs.find((j) => j.status === "completed");
-      if (latest) handleSelectJob(latest);
-    }
-  }, [jobs, previewJobId, handleSelectJob]);
+  async function openPopup(job: JobRecord, showDetails: boolean) {
+    if (job.status !== "completed") return;
+    setPopupJob(job);
+    setPopupUrl(null);
+    setPopupLoading(true);
+    setPopupShowDetails(showDetails);
+
+    const freshUrl = await getSignedVideoUrl(job.id);
+    setPopupUrl(freshUrl || job.video_url);
+    setPopupLoading(false);
+  }
+
+  function handleClosePopup() {
+    setPopupJob(null);
+    setPopupUrl(null);
+    setPopupLoading(false);
+    setPopupShowDetails(false);
+  }
 
   if (!session) return null;
 
@@ -133,7 +400,7 @@ export default function Dashboard({ session, isAdmin, onLogout }: Props) {
       <Navbar
         session={session}
         isAdmin={isAdmin}
-        onLogin={() => {}}
+        onOpenAuth={() => {}}
         onLogout={onLogout}
       />
 
@@ -146,96 +413,40 @@ export default function Dashboard({ session, isAdmin, onLogout }: Props) {
             <p className="text-white/40 text-sm mt-1">Create and manage your videos</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Left column: Video Preview */}
-            <div className="space-y-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-white/60 uppercase tracking-wider">
-                <Film className="w-4 h-4" />
-                Preview
-              </h2>
-              <div className="rounded-2xl bg-surface-card border border-white/5 overflow-hidden">
-                {previewLoading ? (
-                  <div className="flex flex-col items-center justify-center py-20">
-                    <Loader2 className="w-8 h-8 text-primary animate-spin" />
-                    <p className="text-white/30 text-sm mt-3">Loading video...</p>
-                  </div>
-                ) : previewUrl ? (
-                  <div>
-                    <div className="bg-black flex items-center justify-center">
-                      <video
-                        key={previewUrl}
-                        src={previewUrl}
-                        controls
-                        className="w-full max-h-[60vh]"
-                        style={{ aspectRatio: "9/16" }}
-                      />
-                    </div>
-                    <div className="p-4 flex gap-3">
-                      <a
-                        href={previewUrl}
-                        download
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"
-                      >
-                        <Download className="w-4 h-4" />
-                        Download
-                      </a>
-                      {previewJobId && (
-                        <Link
-                          to={`/preview/${previewJobId}`}
-                          target="_blank"
-                          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white/60 font-semibold rounded-xl transition-colors text-sm"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                          Share
-                        </Link>
-                      )}
-                    </div>
-                    {previewScript && (
-                      <div className="px-4 pb-4">
-                        <details className="rounded-xl border border-white/5 bg-surface">
-                          <summary className="px-4 py-3 text-sm font-medium text-white/50 cursor-pointer hover:text-white/70">
-                            View Script
-                          </summary>
-                          <p className="px-4 pb-4 text-sm text-white/35 leading-relaxed whitespace-pre-wrap">
-                            {previewScript}
-                          </p>
-                        </details>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-20 text-center px-6">
-                    <Video className="w-12 h-12 text-white/10 mb-3" />
-                    <p className="text-white/30 text-sm">No video selected</p>
-                    <p className="text-white/15 text-xs mt-1">
-                      Generate a video or select one from your history below
-                    </p>
-                  </div>
-                )}
-              </div>
+          {profile && profile.tier === "free" && (
+            <div className="mb-6 flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 px-5 py-3">
+              <span className="text-sm text-white/70">
+                <strong className="text-white">{profile.daily_videos_used}</strong> of{" "}
+                <strong className="text-white">{appSettings.free_tier_daily_limit || "15"}</strong> daily videos used
+              </span>
+              <Link
+                to="/pricing"
+                className="flex items-center gap-1 text-sm font-semibold text-primary hover:text-primary-light transition-colors"
+              >
+                Upgrade
+                <ArrowUpRight className="w-4 h-4" />
+              </Link>
             </div>
+          )}
 
-            {/* Right column: Video Generator */}
-            <div className="space-y-4">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-white/60 uppercase tracking-wider">
-                <Play className="w-4 h-4" />
-                Create New Video
-              </h2>
-              <VideoGenerator
-                session={session}
-                onNeedAuth={() => {}}
-                onVideoGenerated={handleVideoGenerated}
-              />
-            </div>
+          {/* Create New Video */}
+          <div className="space-y-4 mb-10">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white/60 uppercase tracking-wider">
+              <Play className="w-4 h-4" />
+              Create New Video
+            </h2>
+            <VideoGenerator
+              session={session}
+              onNeedAuth={() => {}}
+              onVideoGenerated={handleVideoGenerated}
+            />
           </div>
 
-          {/* Video History Table */}
+          {/* TikTok-style Video Grid */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-white/60 uppercase tracking-wider">
-                <Clock className="w-4 h-4" />
+                <Video className="w-4 h-4" />
                 Your Videos
               </h2>
               <button
@@ -247,99 +458,43 @@ export default function Dashboard({ session, isAdmin, onLogout }: Props) {
               </button>
             </div>
 
-            <div className="rounded-2xl bg-surface-card border border-white/5 overflow-hidden">
-              {loadingJobs ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                </div>
-              ) : jobs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center px-6">
-                  <Film className="w-10 h-10 text-white/10 mb-3" />
-                  <p className="text-white/30 text-sm">No videos yet</p>
-                  <p className="text-white/15 text-xs mt-1">
-                    Create your first video using the form above
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-white/5">
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/30 uppercase tracking-wider">Topic</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/30 uppercase tracking-wider hidden sm:table-cell">Duration</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/30 uppercase tracking-wider hidden md:table-cell">Voice</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/30 uppercase tracking-wider">Status</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-white/30 uppercase tracking-wider hidden sm:table-cell">Date</th>
-                        <th className="text-right px-5 py-3 text-xs font-semibold text-white/30 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.03]">
-                      {jobs.map((job) => {
-                        const isSelected = previewJobId === job.id;
-                        const isCompleted = job.status === "completed";
-
-                        return (
-                          <tr
-                            key={job.id}
-                            onClick={() => isCompleted && handleSelectJob(job)}
-                            className={`transition-colors ${
-                              isCompleted ? "cursor-pointer hover:bg-white/[0.03]" : ""
-                            } ${isSelected ? "bg-primary/5" : ""}`}
-                          >
-                            <td className="px-5 py-3.5">
-                              <span className={`font-medium truncate block max-w-[200px] ${isSelected ? "text-primary" : "text-white/80"}`}>
-                                {job.topic}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5 text-white/40 hidden sm:table-cell">
-                              {job.duration}s
-                            </td>
-                            <td className="px-5 py-3.5 text-white/40 hidden md:table-cell">
-                              {job.voice}
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <StatusBadge status={job.status} />
-                              {job.status === "failed" && job.error && (
-                                <span className="ml-2 group relative">
-                                  <AlertCircle className="w-3.5 h-3.5 text-red-400/60 inline-block" />
-                                  <span className="absolute left-0 bottom-full mb-1 hidden group-hover:block bg-surface-card border border-white/10 rounded-lg px-3 py-2 text-xs text-red-400 whitespace-nowrap z-10 shadow-xl">
-                                    {job.error}
-                                  </span>
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-5 py-3.5 text-white/30 text-xs hidden sm:table-cell">
-                              {new Date(job.created_at).toLocaleDateString(undefined, {
-                                month: "short",
-                                day: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </td>
-                            <td className="px-5 py-3.5 text-right">
-                              {isCompleted && (
-                                <Link
-                                  to={`/preview/${job.id}`}
-                                  target="_blank"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="inline-flex items-center gap-1 text-xs text-primary/60 hover:text-primary transition-colors"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                  <span className="hidden sm:inline">Preview</span>
-                                </Link>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            {loadingJobs ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-6 h-6 text-primary animate-spin" />
+              </div>
+            ) : jobs.length === 0 ? (
+              <div className="rounded-2xl bg-surface-card border border-white/5 flex flex-col items-center justify-center py-16 text-center px-6">
+                <Film className="w-10 h-10 text-white/10 mb-3" />
+                <p className="text-white/30 text-sm">No videos yet</p>
+                <p className="text-white/15 text-xs mt-1">
+                  Create your first video using the form above
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                {jobs.map((job) => (
+                  <VideoCard
+                    key={job.id}
+                    job={job}
+                    onClick={() => openPopup(job, false)}
+                    onShowInfo={() => openPopup(job, true)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </main>
+
+      {popupJob && (
+        <VideoPlayerModal
+          job={popupJob}
+          videoUrl={popupUrl}
+          loading={popupLoading}
+          onClose={handleClosePopup}
+          initialShowDetails={popupShowDetails}
+        />
+      )}
     </div>
   );
 }

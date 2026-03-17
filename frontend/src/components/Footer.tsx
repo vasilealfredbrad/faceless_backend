@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Video } from "lucide-react";
 
 export default function Footer() {
@@ -12,6 +13,9 @@ export default function Footer() {
           <a href="#faq" className="hover:text-white/60 transition-colors">
             FAQ
           </a>
+          <Link to="/pricing" className="hover:text-white/60 transition-colors">
+            Pricing
+          </Link>
           <a href="#generator" className="hover:text-white/60 transition-colors">
             Generator
           </a>

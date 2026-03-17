@@ -13,7 +13,7 @@ function hasVaapi(): boolean {
   if (_vaapiChecked) return _vaapiAvailable;
   _vaapiChecked = true;
   if (!fs.existsSync(VAAPI_DEVICE)) {
-    console.error("[video] VAAPI device not found:", VAAPI_DEVICE);
+    console.warn("[video] VAAPI device not found:", VAAPI_DEVICE);
     _vaapiAvailable = false;
     return false;
   }
@@ -27,7 +27,7 @@ function hasVaapi(): boolean {
     console.log("[video] VAAPI encode test passed — GPU available");
     _vaapiAvailable = true;
   } catch {
-    console.error("[video] VAAPI encode test failed — GPU not functional");
+    console.warn("[video] VAAPI encode test failed — will use CPU fallback");
     _vaapiAvailable = false;
   }
   return _vaapiAvailable;
@@ -61,22 +61,19 @@ function pickRandomBackground(category: string, duration: 30 | 60): string {
   return path.join(dir, pick);
 }
 
-function runEncode(
-  bgPath: string,
-  audioPath: string,
-  assPath: string,
-  duration: number,
-  outputPath: string,
-): Promise<string> {
-  if (!hasVaapi()) {
-    throw new Error(
-      `VAAPI device ${VAAPI_DEVICE} not available. GPU encoding is required.`
-    );
-  }
+function spawnEncode(args: string[]): Promise<{ code: number; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", args);
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => resolve({ code: code ?? 1, stderr }));
+    proc.on("error", (err) => reject(new Error(`FFmpeg spawn: ${err.message}`)));
+  });
+}
 
-  const outputFilename = path.basename(outputPath);
-
-  // GPU decode → GPU scale (fill) → hwdownload → CPU crop + ass → hwupload → GPU encode
+function vaapiArgs(
+  bgPath: string, audioPath: string, assPath: string, duration: number, outputPath: string,
+): string[] {
   const filterComplex = [
     `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2`,
     `hwdownload,format=nv12`,
@@ -85,7 +82,7 @@ function runEncode(
     `format=nv12,hwupload[v]`,
   ].join(",");
 
-  const args = [
+  return [
     "-y", "-hide_banner", "-loglevel", "error",
     "-init_hw_device", `vaapi=va:${VAAPI_DEVICE}`,
     "-filter_hw_device", "va",
@@ -114,21 +111,69 @@ function runEncode(
     "-movflags", "+faststart",
     outputPath,
   ];
+}
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn("ffmpeg", args);
-    let stderr = "";
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => {
-      if (code === 0) {
-        console.log("[video] Encoded with VAAPI (GPU)");
-        resolve(outputFilename);
-      } else {
-        reject(new Error(`FFmpeg exited ${code}: ${stderr.slice(-500)}`));
-      }
-    });
-    proc.on("error", (err) => reject(new Error(`FFmpeg spawn: ${err.message}`)));
-  });
+function softwareArgs(
+  bgPath: string, audioPath: string, assPath: string, duration: number, outputPath: string,
+): string[] {
+  const filterComplex = [
+    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase`,
+    `crop=1080:1920`,
+    `ass='${assPath}'[v]`,
+  ].join(",");
+
+  return [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-i", bgPath,
+    "-i", audioPath,
+    "-filter_complex", filterComplex,
+    "-map", "[v]",
+    "-map", "1:a",
+    "-c:v", "libx264",
+    "-crf", "18",
+    "-preset", "fast",
+    "-profile:v", "high",
+    "-level", "4.2",
+    "-pix_fmt", "yuv420p",
+    "-r", "60",
+    "-c:a", "aac", "-b:a", "192k",
+    "-threads", "0",
+    "-t", String(duration),
+    "-movflags", "+faststart",
+    outputPath,
+  ];
+}
+
+async function runEncode(
+  bgPath: string,
+  audioPath: string,
+  assPath: string,
+  duration: number,
+  outputPath: string,
+): Promise<string> {
+  const outputFilename = path.basename(outputPath);
+  const useVaapi = hasVaapi();
+
+  if (useVaapi) {
+    const args = vaapiArgs(bgPath, audioPath, assPath, duration, outputPath);
+    const result = await spawnEncode(args);
+    if (result.code === 0) {
+      console.log("[video] Encoded with VAAPI (GPU)");
+      return outputFilename;
+    }
+    console.warn("[video] VAAPI encode failed, falling back to CPU:", result.stderr.slice(-300));
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  }
+
+  console.log("[video] Encoding with libx264 (CPU)...");
+  const args = softwareArgs(bgPath, audioPath, assPath, duration, outputPath);
+  const result = await spawnEncode(args);
+  if (result.code === 0) {
+    console.log("[video] Encoded with libx264 (CPU)");
+    return outputFilename;
+  }
+
+  throw new Error(`FFmpeg exited ${result.code}: ${result.stderr.slice(-500)}`);
 }
 
 export async function assembleVideo(

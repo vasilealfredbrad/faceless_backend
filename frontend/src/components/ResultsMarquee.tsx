@@ -27,7 +27,7 @@ export default function ResultsMarquee() {
   return (
     <section className="py-12 overflow-hidden">
       <p className="text-center text-sm font-semibold text-white/30 uppercase tracking-widest mb-8">
-        Results from our autopilot creators
+        Results from creators using fast bulk automation
       </p>
       <div className="flex animate-marquee" style={{ width: "max-content" }}>
         {doubled.map((count, i) => (

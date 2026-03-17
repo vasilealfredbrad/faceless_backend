@@ -4,7 +4,9 @@ import { generateVoice, timeStretchAudio, scaleTimestamps } from "./services/voi
 import { generateSubtitles } from "./services/subtitles.js";
 import { assembleVideo } from "./services/video.js";
 import { uploadFile } from "./services/storage.js";
+import { generateThumbnail } from "./services/thumbnail.js";
 import { jobsProcessedTotal, jobDurationSeconds, jobsInProgress } from "./services/metrics.js";
+import { containsProfanity } from "./services/profanity.js";
 import fs from "fs";
 import path from "path";
 
@@ -14,7 +16,7 @@ const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "10000", 10);
 
 interface Job {
   id: string;
-  user_id: string;
+  user_id: string | null;
   status: string;
   topic: string;
   duration: 30 | 60;
@@ -24,6 +26,7 @@ interface Job {
   audio_url: string | null;
   subtitles_url: string | null;
   video_url: string | null;
+  thumbnail_url: string | null;
   error: string | null;
 }
 
@@ -38,6 +41,7 @@ const VALID_VOICES = new Set([
 
 function validateJob(job: Job): string | null {
   if (!job.topic || job.topic.length > 500) return "Invalid topic";
+  if (containsProfanity(job.topic)) return "Topic contains inappropriate language";
   if (![30, 60].includes(job.duration)) return "Duration must be 30 or 60";
   if (!VALID_VOICES.has(job.voice)) return `Invalid voice: ${job.voice}`;
   if (!job.background || !/^[a-z0-9-]+$/i.test(job.background)) return "Invalid background category";
@@ -243,17 +247,25 @@ export class Worker {
         jobId: job.id,
       });
 
-      // Step 6: Upload ALL files to B2 in parallel
+      // Step 6: Generate thumbnail + Upload ALL files to B2 in parallel
       await this.updateJob(job.id, { status: "uploading" });
       const localVideoPath = path.join(GENERATED_DIR, videoFilename);
 
+      const thumbPath = await generateThumbnail(localVideoPath, job.id);
+
       const uploadStart = Date.now();
       console.log(`[${job.id}] Uploading all assets to B2...`);
-      const [audio_url, subtitles_url, video_url] = await Promise.all([
+      const uploads: Promise<string>[] = [
         uploadFile(audioPath, `jobs/${job.id}/audio.mp3`),
         uploadFile(assPath, `jobs/${job.id}/subtitles.ass`),
         uploadFile(localVideoPath, `jobs/${job.id}/video.mp4`),
-      ]);
+      ];
+      if (thumbPath) {
+        uploads.push(uploadFile(thumbPath, `jobs/${job.id}/thumb.jpg`));
+      }
+      const results = await Promise.all(uploads);
+      const [audio_url, subtitles_url, video_url] = results;
+      const thumbnail_url = thumbPath ? results[3] : null;
       console.log(`[${job.id}] All uploads finished in ${((Date.now() - uploadStart) / 1000).toFixed(1)}s`);
 
       await this.updateJob(job.id, {
@@ -261,6 +273,7 @@ export class Worker {
         audio_url,
         subtitles_url,
         video_url,
+        thumbnail_url,
       });
 
       const elapsedSec = (Date.now() - t0) / 1000;

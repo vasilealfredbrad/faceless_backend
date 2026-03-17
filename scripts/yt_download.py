@@ -2,6 +2,10 @@
 """
 Download a YouTube video, trim first/last 10 seconds, then cut random
 30 or 60-second segments and save them into the appropriate category folder.
+
+Supports two modes:
+  --url       Download from YouTube first, then cut
+  --input     Use an existing local file (for reprocessing)
 """
 
 import argparse
@@ -13,6 +17,7 @@ import subprocess
 import sys
 import time
 import uuid
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import yt_dlp
 
@@ -36,7 +41,6 @@ def has_vaapi() -> bool:
 
 
 def get_duration(video_path: str) -> float:
-    """Get video duration in seconds using ffprobe."""
     r = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", video_path],
@@ -45,16 +49,8 @@ def get_duration(video_path: str) -> float:
     return float(r.stdout.strip())
 
 
-def cut_with_ffmpeg(
-    input_path: str, start: float, duration: int,
-    output_path: str,
-) -> None:
-    """Cut a segment using FFmpeg with full VAAPI GPU pipeline (decode+scale+encode)."""
-    if not has_vaapi():
-        raise RuntimeError(
-            f"VAAPI device {VAAPI_DEVICE} not available. GPU encoding is required."
-        )
-    cmd = [
+def _vaapi_cmd(input_path: str, start: float, duration: int, output_path: str) -> list[str]:
+    return [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}",
         "-hwaccel", "vaapi",
@@ -75,41 +71,90 @@ def cut_with_ffmpeg(
         "-movflags", "+faststart",
         output_path,
     ]
+
+
+def _software_cmd(input_path: str, start: float, duration: int, output_path: str) -> list[str]:
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-ss", f"{start:.3f}", "-t", str(duration),
+        "-i", input_path,
+        "-an",
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "fast",
+        "-profile:v", "high",
+        "-level", "4.2",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+
+
+def cut_with_ffmpeg(
+    input_path: str, start: float, duration: int,
+    output_path: str,
+) -> str:
+    """Cut a segment. Try VAAPI (GPU) first, fall back to libx264 (CPU)."""
+    use_vaapi = has_vaapi()
+
+    if use_vaapi:
+        cmd = _vaapi_cmd(input_path, start, duration, output_path)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            return "vaapi"
+        except subprocess.CalledProcessError:
+            sys.stderr.write("[encode] VAAPI failed, falling back to libx264 (CPU)\n")
+            sys.stderr.flush()
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    cmd = _software_cmd(input_path, start, duration, output_path)
     subprocess.run(cmd, check=True)
+    return "libx264"
 
 
 def clean_url(url: str) -> str:
-    """Strip timestamp and tracking params, keep only the video ID."""
-    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
     clean = {k: v for k, v in params.items() if k == "v"}
     return urlunparse(parsed._replace(query=urlencode(clean, doseq=True)))
 
 
-def download_video(url: str, out_dir: str) -> str:
-    """Download a YouTube video to out_dir, return the actual file path."""
+def extract_youtube_id(url: str) -> str | None:
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    if "youtu.be" in hostname:
+        return parsed.path.lstrip("/").split("/")[0] or None
+    params = parse_qs(parsed.query)
+    v = params.get("v")
+    return v[0] if v else None
+
+
+def download_video(url: str, out_dir: str) -> dict:
+    """Download a YouTube video. Returns dict with path, title, youtube_id."""
     url = clean_url(url)
-    # Use a fixed base name; %(ext)s lets yt-dlp pick the real extension
     outtmpl = os.path.join(out_dir, "source.%(ext)s")
     ydl_opts = {
-        # Video only, prefer highest bitrate up to 1440p
         "format": "bestvideo[height<=1440]/best[height<=1440]",
         "format_sort": ["res:1440", "vbr", "fps"],
         "outtmpl": outtmpl,
         "noplaylist": True,
-        "max_filesize": 5 * 1024 * 1024 * 1024,  # 5GB
-        # Speed: concurrent fragment downloads (DASH/HLS)
+        "max_filesize": 5 * 1024 * 1024 * 1024,
         "concurrent_fragment_downloads": 8,
         "buffersize": 256 * 1024,
-        # Stability: retries
         "retries": 15,
         "fragment_retries": 15,
         "file_access_retries": 5,
         "extractor_retries": 5,
     }
+
+    title = None
+    youtube_id = None
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        title = info.get("title")
+        youtube_id = info.get("id")
         fmt = info.get("format", "unknown")
         height = info.get("height", "?")
         vbr = info.get("vbr", "?")
@@ -119,11 +164,16 @@ def download_video(url: str, out_dir: str) -> str:
         )
         sys.stderr.flush()
         ydl.download([url])
-    # Find whatever file yt-dlp actually wrote (could be .webm, .mp4, .mkv)
+
     VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".avi", ".mov")
     for f in os.listdir(out_dir):
         if f.lower().endswith(VIDEO_EXTS):
-            return os.path.join(out_dir, f)
+            return {
+                "path": os.path.join(out_dir, f),
+                "title": title,
+                "youtube_id": youtube_id,
+            }
+
     try:
         contents = os.listdir(out_dir)
     except OSError as e:
@@ -140,10 +190,10 @@ def cut_segments(
     duration: int,
     num_clips: int,
     videos_dir: str,
-) -> list[str]:
+) -> list[dict]:
     """
-    Trim first/last 10s from the video, then cut random segments of
-    the specified duration using FFmpeg with VAAPI GPU encoding.
+    Trim first/last 10s, then cut random segments.
+    Returns list of dicts with clip metadata.
     """
     total_duration = get_duration(video_path)
 
@@ -177,22 +227,30 @@ def cut_segments(
 
     chosen_starts = sorted(random.sample(all_possible_starts, actual_clips))
 
-    sys.stderr.write("[encode] Using VAAPI (GPU) for clip encoding\n")
-    sys.stderr.flush()
-
-    output_files = []
+    encoder_used = "unknown"
+    clips_meta = []
     for i, start_time in enumerate(chosen_starts):
         filename = f"bg_{start_index + i:03d}.mp4"
         filepath = os.path.join(output_dir, filename)
-        cut_with_ffmpeg(video_path, start_time, duration, filepath)
-        output_files.append(filepath)
+        encoder_used = cut_with_ffmpeg(video_path, start_time, duration, filepath)
+        clips_meta.append({
+            "filename": filename,
+            "clip_path": filepath,
+            "start_time": round(start_time, 3),
+            "duration": duration,
+        })
 
-    return output_files
+    if clips_meta:
+        sys.stderr.write(f"[encode] Used encoder: {encoder_used}\n")
+        sys.stderr.flush()
+
+    return clips_meta
 
 
 def main():
     parser = argparse.ArgumentParser(description="Download & cut YT videos for backgrounds")
-    parser.add_argument("--url", required=True, help="YouTube video URL")
+    parser.add_argument("--url", default=None, help="YouTube video URL")
+    parser.add_argument("--input", default=None, help="Path to an existing local video (for reprocessing)")
     parser.add_argument("--category", required=True, help="Background category (e.g. minecraft)")
     parser.add_argument("--duration", type=int, required=True, choices=[30, 60], help="Clip duration")
     parser.add_argument("--clips", type=int, default=5, help="Number of clips to cut")
@@ -202,30 +260,66 @@ def main():
                         help="Directory for downloads (default: YT_DOWNLOAD_DIR or yt_download_raw)")
     args = parser.parse_args()
 
-    progress = {"step": "", "error": ""}
-
-    # Download directory: --download-dir > env YT_DOWNLOAD_DIR
-    base_dir = args.download_dir or os.environ.get("YT_DOWNLOAD_DIR")
-    if not base_dir or not os.path.isdir(base_dir):
-        progress["error"] = f"Download directory required (--download-dir or YT_DOWNLOAD_DIR); got: {base_dir}"
-        print(json.dumps(progress), flush=True)
+    if not args.url and not args.input:
+        print(json.dumps({"error": "Either --url or --input is required"}), flush=True)
         sys.exit(1)
 
-    download_dir = os.path.join(base_dir, f"yt_{int(time.time())}_{uuid.uuid4().hex[:8]}")
-    os.makedirs(download_dir, exist_ok=True)
+    progress = {"step": "", "error": ""}
+    download_dir = None
+    video_path = None
+    title = None
+    youtube_id = None
+    source_path = None
+    total_duration = None
 
     try:
-        progress["step"] = "Downloading video from YouTube..."
-        print(json.dumps(progress), flush=True)
+        if args.input:
+            # Reprocess mode: use existing file
+            if not os.path.isfile(args.input):
+                raise FileNotFoundError(f"Input file not found: {args.input}")
+            video_path = args.input
+            source_path = args.input
+            total_duration = get_duration(video_path)
+            progress["step"] = f"Reprocessing existing video ({total_duration:.0f}s)..."
+            print(json.dumps(progress), flush=True)
+        else:
+            # Download mode
+            base_dir = args.download_dir or os.environ.get("YT_DOWNLOAD_DIR")
+            if not base_dir or not os.path.isdir(base_dir):
+                progress["error"] = f"Download directory required (--download-dir or YT_DOWNLOAD_DIR); got: {base_dir}"
+                print(json.dumps(progress), flush=True)
+                sys.exit(1)
 
-        video_path = download_video(args.url, download_dir)
-        sys.stderr.write(f"[yt-dlp] Saved to: {video_path}\n")
-        sys.stderr.flush()
+            download_dir = os.path.join(base_dir, f"yt_{int(time.time())}_{uuid.uuid4().hex[:8]}")
+            os.makedirs(download_dir, exist_ok=True)
+
+            progress["step"] = "Downloading video from YouTube..."
+            print(json.dumps(progress), flush=True)
+
+            dl_result = download_video(args.url, download_dir)
+            video_path = dl_result["path"]
+            title = dl_result["title"]
+            youtube_id = dl_result["youtube_id"]
+
+            total_duration = get_duration(video_path)
+
+            # Move source to a permanent location
+            source_dir = os.path.join(args.videos_dir, "_sources", args.category)
+            os.makedirs(source_dir, exist_ok=True)
+            ts = int(time.time())
+            ext = os.path.splitext(video_path)[1]
+            source_filename = f"{youtube_id or 'video'}_{ts}{ext}"
+            source_path = os.path.join(source_dir, source_filename)
+            shutil.move(video_path, source_path)
+            video_path = source_path
+
+            sys.stderr.write(f"[yt-dlp] Source saved to: {source_path}\n")
+            sys.stderr.flush()
 
         progress["step"] = f"Cutting {args.clips} x {args.duration}s clips..."
         print(json.dumps(progress), flush=True)
 
-        output_files = cut_segments(
+        clips_meta = cut_segments(
             video_path,
             args.category,
             args.duration,
@@ -235,8 +329,13 @@ def main():
 
         result = {
             "step": "Done!",
-            "files": output_files,
-            "count": len(output_files),
+            "count": len(clips_meta),
+            "files": [c["clip_path"] for c in clips_meta],
+            "clips": clips_meta,
+            "source_path": source_path,
+            "title": title,
+            "youtube_id": youtube_id,
+            "duration_seconds": total_duration,
         }
         print(json.dumps(result), flush=True)
 
@@ -245,8 +344,9 @@ def main():
         print(json.dumps(progress), flush=True)
         sys.exit(1)
     finally:
-        # Clean up the download dir after clips are cut
-        shutil.rmtree(download_dir, ignore_errors=True)
+        # Clean up only the temp download dir (not the moved source)
+        if download_dir and os.path.isdir(download_dir):
+            shutil.rmtree(download_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

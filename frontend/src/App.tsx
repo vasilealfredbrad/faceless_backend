@@ -7,25 +7,24 @@ import ResultsMarquee from "./components/ResultsMarquee";
 import HowItWorks from "./components/HowItWorks";
 import FAQ from "./components/FAQ";
 import Footer from "./components/Footer";
-import AuthModal from "./components/AuthModal";
+import AuthModal, { type AuthMode } from "./components/AuthModal";
 import Preview from "./pages/Preview";
 import Admin from "./pages/Admin";
 import Dashboard from "./pages/Dashboard";
+import Pricing from "./pages/Pricing";
 import { supabase } from "./lib/supabase";
 import { checkIsAdmin, clearAdminCache } from "./lib/admin";
 
 function LandingPage({
   session,
   isAdmin,
-  onLogin,
   onLogout,
 }: {
   session: Session | null;
   isAdmin: boolean;
-  onLogin: () => void;
   onLogout: () => void;
 }) {
-  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
 
   if (session) {
     return <Navigate to="/dashboard" replace />;
@@ -36,18 +35,21 @@ function LandingPage({
       <Navbar
         session={session}
         isAdmin={isAdmin}
-        onLogin={() => {
-          onLogin();
-          setShowAuth(true);
-        }}
+        onOpenAuth={(mode) => setAuthMode(mode)}
         onLogout={onLogout}
       />
-      <Hero onStart={() => setShowAuth(true)} />
+      <Hero onStart={() => setAuthMode("register")} />
       <ResultsMarquee />
       <HowItWorks />
       <FAQ />
       <Footer />
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      {authMode && (
+        <AuthModal
+          mode={authMode}
+          onClose={() => setAuthMode(null)}
+          onSwitchMode={setAuthMode}
+        />
+      )}
     </div>
   );
 }
@@ -84,7 +86,6 @@ export default function App() {
             <LandingPage
               session={session}
               isAdmin={isAdmin}
-              onLogin={() => {}}
               onLogout={() => supabase.auth.signOut()}
             />
           }
@@ -93,6 +94,16 @@ export default function App() {
           path="/dashboard"
           element={
             <Dashboard
+              session={session}
+              isAdmin={isAdmin}
+              onLogout={() => supabase.auth.signOut()}
+            />
+          }
+        />
+        <Route
+          path="/pricing"
+          element={
+            <Pricing
               session={session}
               isAdmin={isAdmin}
               onLogout={() => supabase.auth.signOut()}

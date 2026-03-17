@@ -3,25 +3,25 @@ import { Settings, Zap, TrendingUp } from "lucide-react";
 const STEPS = [
   {
     icon: Settings,
-    title: "Set It",
+    title: "Set Once",
     description:
-      "Enter your topic, pick a voice and background. Customize your video in just a few clicks.",
+      "Enter your topic, pick a voice and background, and choose your output volume in a few clicks.",
     color: "text-primary",
     bg: "bg-primary/10",
   },
   {
     icon: Zap,
-    title: "Forget It",
+    title: "Generate Fast",
     description:
-      "Our AI writes the script, generates the voiceover, and assembles the video automatically.",
+      "Our AI writes scripts, creates voiceovers, and assembles ready-to-post videos in seconds.",
     color: "text-accent",
     bg: "bg-accent/10",
   },
   {
     icon: TrendingUp,
-    title: "Watch It Grow",
+    title: "Scale Output",
     description:
-      "Download your video and post it. Sit back and watch your views and followers soar.",
+      "Produce and publish in bulk to stay consistent, grow faster, and compound results across channels.",
     color: "text-accent-light",
     bg: "bg-accent-light/10",
   },
@@ -32,12 +32,12 @@ export default function HowItWorks() {
     <section className="py-20 px-4">
       <div className="max-w-5xl mx-auto">
         <h2 className="font-display text-3xl sm:text-4xl font-bold text-center mb-4">
-          Run Your Channels on{" "}
+          Run Your Content Engine on{" "}
           <span className="text-primary">Autopilot</span>
         </h2>
         <p className="text-center text-white/40 mb-14 max-w-lg mx-auto">
-          Your own personal content creation team — creating and growing your
-          channels effortlessly.
+          Built for creators who want speed and scale: produce more videos in
+          less time without sacrificing consistency.
         </p>
 
         <div className="grid md:grid-cols-3 gap-6">

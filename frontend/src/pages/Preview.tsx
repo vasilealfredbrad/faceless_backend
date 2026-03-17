@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import { Play, ArrowLeft, Download, Share2, Loader2 } from "lucide-react";
+import { Play, ArrowLeft, Download, Loader2, LogIn } from "lucide-react";
 
 interface Job {
   id: string;
@@ -37,30 +37,39 @@ export default function Preview() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!jobId) return;
 
+    let cancelled = false;
+
     async function fetchJob() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        if (!cancelled) setError("sign_in_required");
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
       const { data, error: fetchErr } = await supabase
         .from("jobs")
         .select("*")
         .eq("id", jobId)
+        .eq("user_id", user.id)
         .single();
 
       if (fetchErr || !data) {
-        setError("Video not found");
-        setLoading(false);
+        if (!cancelled) setError("Video not found");
+        if (!cancelled) setLoading(false);
         return;
       }
 
-      setJob(data as Job);
-      setLoading(false);
+      if (!cancelled) setJob(data as Job);
+      if (!cancelled) setLoading(false);
 
       if (data.status === "completed" && data.video_url) {
         const signed = await getSignedVideoUrl(jobId!);
-        setVideoSrc(signed || data.video_url);
+        if (!cancelled) setVideoSrc(signed || data.video_url);
       }
 
       if (data.status !== "completed" && data.status !== "failed") {
@@ -76,36 +85,47 @@ export default function Preview() {
             },
             async (payload) => {
               const updated = payload.new as Job;
-              setJob(updated);
+              if (!cancelled) setJob(updated);
               if (updated.status === "completed" && updated.video_url) {
                 const signed = await getSignedVideoUrl(jobId!);
-                setVideoSrc(signed || updated.video_url);
+                if (!cancelled) setVideoSrc(signed || updated.video_url);
               }
             }
           )
           .subscribe();
 
         return () => {
+          cancelled = true;
           supabase.removeChannel(channel);
         };
       }
     }
 
     fetchJob();
-  }, [jobId]);
 
-  function handleShare() {
-    const url = window.location.href;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
+    return () => { cancelled = true; };
+  }, [jobId]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (error === "sign_in_required") {
+    return (
+      <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-4">
+        <LogIn className="w-10 h-10 text-white/20" />
+        <p className="text-white/60 text-lg">Sign in to view this video</p>
+        <Link
+          to="/"
+          className="flex items-center gap-2 text-primary hover:text-primary-dark transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Go to Home
+        </Link>
       </div>
     );
   }
@@ -132,11 +152,11 @@ export default function Preview() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <Link
-            to="/"
+            to="/dashboard"
             className="flex items-center gap-2 text-white/60 hover:text-white transition-colors text-sm"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back
+            Back to Studio
           </Link>
           <span className="font-display text-lg font-bold text-white">
             Invisible Creator<span className="text-primary">.video</span>
@@ -165,12 +185,12 @@ export default function Preview() {
 
           {job.status === "completed" && videoSrc && (
             <>
-              <div className="rounded-2xl overflow-hidden border border-white/10 bg-black">
+              <div className="rounded-2xl overflow-hidden border border-white/10 bg-black w-fit mx-auto">
                 <video
                   src={videoSrc}
                   controls
                   autoPlay
-                  className="w-full max-h-[70vh] mx-auto"
+                  className="w-auto max-h-[70vh] mx-auto"
                   style={{ aspectRatio: "9/16" }}
                 />
               </div>
@@ -186,13 +206,6 @@ export default function Preview() {
                   <Download className="w-4 h-4" />
                   Download
                 </a>
-                <button
-                  onClick={handleShare}
-                  className="flex items-center justify-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-white/60 font-semibold rounded-xl transition-colors text-sm"
-                >
-                  <Share2 className="w-4 h-4" />
-                  {copied ? "Copied!" : "Share"}
-                </button>
               </div>
             </>
           )}
