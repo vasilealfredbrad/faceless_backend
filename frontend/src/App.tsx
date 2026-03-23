@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Session } from "@supabase/supabase-js";
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
 import ResultsMarquee from "./components/ResultsMarquee";
+import GuestGenerator from "./components/GuestGenerator";
 import HowItWorks from "./components/HowItWorks";
 import FAQ from "./components/FAQ";
 import Footer from "./components/Footer";
@@ -26,10 +27,6 @@ function LandingPage({
 }) {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
 
-  if (session) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
   return (
     <div className="min-h-screen bg-surface">
       <Navbar
@@ -38,9 +35,10 @@ function LandingPage({
         onOpenAuth={(mode) => setAuthMode(mode)}
         onLogout={onLogout}
       />
-      <Hero onStart={() => setAuthMode("register")} />
+      <Hero onStart={() => session ? window.location.assign("/dashboard") : setAuthMode("register")} />
       <ResultsMarquee />
       <HowItWorks />
+      <GuestGenerator />
       <FAQ />
       <Footer />
       {authMode && (

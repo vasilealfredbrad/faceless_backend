@@ -1,6 +1,6 @@
 import { Session } from "@supabase/supabase-js";
 import { Link, useLocation } from "react-router-dom";
-import { Video, LogOut, LogIn, UserPlus, ShieldCheck, LayoutDashboard, CreditCard } from "lucide-react";
+import { Video, LogOut, LogIn, UserPlus, ShieldCheck, LayoutDashboard, CreditCard, Home } from "lucide-react";
 import type { AuthMode } from "./AuthModal";
 
 interface NavbarProps {
@@ -26,7 +26,16 @@ export default function Navbar({ session, isAdmin, onOpenAuth, onLogout }: Navba
         </Link>
 
         <div className="flex items-center gap-3">
-          {!session && (
+          {location.pathname !== "/" && (
+            <Link
+              to="/"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-white/60 hover:text-white transition-colors"
+            >
+              <Home className="w-4 h-4" />
+              <span className="hidden sm:inline">Home</span>
+            </Link>
+          )}
+          {!session && location.pathname === "/" && (
             <a href="#faq" className="text-sm text-white/60 hover:text-white transition-colors hidden sm:block">
               FAQ
             </a>

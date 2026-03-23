@@ -5,8 +5,17 @@ export interface GenerateRequest {
   duration: 30 | 60;
   voice: string;
   background: string;
+  subtitlePreset?: string;
+  wordEffectMode?: WordEffectMode;
   variations?: number;
 }
+
+export type WordEffectMode =
+  | "keep_color_only"
+  | "scale_pop"
+  | "glow"
+  | "box"
+  | "combo";
 
 export interface GenerateResponse {
   jobId: string;
@@ -43,6 +52,11 @@ export interface BulkProgress {
   step: string;
 }
 
+function isWordEffectModeSchemaCacheError(message?: string): boolean {
+  if (!message) return false;
+  return message.includes("word_effect_mode") && message.includes("schema cache");
+}
+
 export async function generateVideo(
   req: GenerateRequest,
   onProgress?: (step: string) => void,
@@ -69,6 +83,8 @@ export async function generateVideo(
     duration: req.duration,
     voice: req.voice,
     background: req.background,
+    subtitle_preset: req.subtitlePreset || "classic",
+    word_effect_mode: req.wordEffectMode || "combo",
     status: "pending" as const,
   }));
 
@@ -77,11 +93,21 @@ export async function generateVideo(
     .insert(rows)
     .select();
 
-  if (insertError || !jobs || jobs.length === 0) {
-    throw new Error(insertError?.message || "Failed to create jobs");
+  let finalJobs = jobs;
+  let finalError = insertError;
+  if (insertError && isWordEffectModeSchemaCacheError(insertError.message)) {
+    // Backward-compatible retry while DB migration rolls out.
+    const fallbackRows = rows.map(({ word_effect_mode: _ignored, ...row }) => row);
+    const retry = await supabase.from("jobs").insert(fallbackRows).select();
+    finalJobs = retry.data;
+    finalError = retry.error;
   }
 
-  const jobIds = jobs.map((j) => j.id as string);
+  if (finalError || !finalJobs || finalJobs.length === 0) {
+    throw new Error(finalError?.message || "Failed to create jobs");
+  }
+
+  const jobIds = finalJobs.map((j) => j.id as string);
   if (onProgress) onProgress(STATUS_LABELS.pending);
 
   return new Promise<GenerateResponse[]>((resolve, reject) => {
@@ -190,6 +216,8 @@ export interface JobRecord {
   duration: number;
   voice: string;
   background: string;
+  subtitle_preset: string;
+  word_effect_mode: WordEffectMode;
   script: string | null;
   video_url: string | null;
   thumbnail_url: string | null;
@@ -238,6 +266,114 @@ export interface CategoryInfo {
 }
 
 export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
+
+export interface GuestJobStatus {
+  id: string;
+  status: string;
+  error: string | null;
+  video_url: string | null;
+  thumbnail_url: string | null;
+  script: string | null;
+}
+
+export async function guestGenerate(
+  topic: string,
+  voice: string,
+  background: string,
+  onDone: (job: GuestJobStatus) => void,
+  onError: (msg: string) => void,
+  subtitlePreset: string = "classic",
+  wordEffectMode: WordEffectMode = "combo",
+): Promise<string> {
+  const payload = {
+    user_id: null,
+    topic: topic.trim().slice(0, 500),
+    duration: 30,
+    voice,
+    background,
+    subtitle_preset: subtitlePreset,
+    word_effect_mode: wordEffectMode,
+    status: "pending",
+    is_guest: true,
+  };
+
+  const { data: job, error } = await supabase
+    .from("jobs")
+    .insert(payload)
+    .select()
+    .single();
+
+  let finalJob = job;
+  let finalError = error;
+  if (error && isWordEffectModeSchemaCacheError(error.message)) {
+    const { word_effect_mode: _ignored, ...fallbackPayload } = payload;
+    const retry = await supabase
+      .from("jobs")
+      .insert(fallbackPayload)
+      .select()
+      .single();
+    finalJob = retry.data;
+    finalError = retry.error;
+  }
+
+  if (finalError || !finalJob) throw new Error(finalError?.message || "Failed to create job");
+
+  const jobId = finalJob.id as string;
+
+  const channel = supabase
+    .channel(`guest-job-${jobId}`)
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "jobs",
+      filter: `id=eq.${jobId}`,
+    }, (payload) => {
+      const updated = payload.new as GuestJobStatus;
+      if (updated.status === "completed" || updated.status === "failed") {
+        supabase.removeChannel(channel);
+        if (updated.status === "completed") {
+          onDone(updated);
+        } else {
+          onError(updated.error || "Generation failed");
+        }
+      }
+    })
+    .subscribe();
+
+  return jobId;
+}
+
+export interface DemoVideo {
+  id: string;
+  topic: string;
+  voice: string;
+  thumbnail_url: string | null;
+  video_url: string | null;
+}
+
+/** Prefer DB-stored URLs so thumbnails/videos load without reaching the API server (e.g. Vercel → DB only). */
+export function demoThumbUrl(demo: DemoVideo): string {
+  if (demo.thumbnail_url) return demo.thumbnail_url;
+  if (BACKEND_URL) return `${BACKEND_URL}/api/demo/media/${demo.id}/thumb`;
+  return "";
+}
+
+export function demoVideoUrl(demo: DemoVideo): string {
+  if (demo.video_url) return demo.video_url;
+  if (BACKEND_URL) return `${BACKEND_URL}/api/demo/media/${demo.id}/video`;
+  return "";
+}
+
+export async function getDemoVideos(): Promise<DemoVideo[]> {
+  const { data } = await supabase
+    .from("jobs")
+    .select("id, topic, voice, thumbnail_url, video_url")
+    .eq("status", "completed")
+    .eq("is_demo", true)
+    .order("created_at", { ascending: false })
+    .limit(6);
+  return (data || []) as DemoVideo[];
+}
 
 export async function getCategories(): Promise<CategoryInfo[]> {
   if (!BACKEND_URL) return [];

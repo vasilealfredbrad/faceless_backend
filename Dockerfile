@@ -10,11 +10,23 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ffmpeg fonts-liberation libass9 curl fontconfig gosu \
       python3 python3-venv python3-pip \
-      mesa-va-drivers vainfo libva2 && \
+      mesa-va-drivers vainfo libva2 unzip && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /usr/share/fonts/truetype/montserrat && \
+    mkdir -p /usr/share/fonts/truetype/montserrat \
+             /usr/share/fonts/truetype/bangers \
+             /usr/share/fonts/truetype/inter \
+             /usr/share/fonts/truetype/courier-prime \
+             /usr/share/fonts/truetype/anton && \
     curl -sL -o /usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf \
       "https://github.com/JulietaUla/Montserrat/raw/master/fonts/ttf/Montserrat-Bold.ttf" && \
+    curl -sL -o /usr/share/fonts/truetype/bangers/Bangers-Regular.ttf \
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/bangers/Bangers-Regular.ttf" && \
+    curl -sL -o "/usr/share/fonts/truetype/inter/Inter-Regular.ttf" \
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf" && \
+    curl -sL -o /usr/share/fonts/truetype/courier-prime/CourierPrime-Regular.ttf \
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/courierprime/CourierPrime-Regular.ttf" && \
+    curl -sL -o /usr/share/fonts/truetype/anton/Anton-Regular.ttf \
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf" && \
     fc-cache -f
 WORKDIR /app
 

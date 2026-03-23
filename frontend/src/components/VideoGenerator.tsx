@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Session } from "@supabase/supabase-js";
-import { generateVideo, GenerateRequest, getCategories, CategoryInfo, BulkProgress } from "../lib/api";
+import { generateVideo, GenerateRequest, getCategories, CategoryInfo, BulkProgress, WordEffectMode } from "../lib/api";
 import { containsProfanity } from "../lib/profanity";
 import VOICE_DEMO_FILES from "../lib/voice-demos";
 import {
@@ -20,11 +20,29 @@ import {
   Layers,
   Play,
   Square,
+  Type,
 } from "lucide-react";
 
 const VOICES = [
   { group: "American Female", voices: ["Autumn", "Melody", "Hannah", "Emily", "Ivy", "Kaitlyn", "Luna", "Willow", "Lauren", "Sierra"] },
   { group: "American Male", voices: ["Noah", "Jasper", "Caleb", "Ronan", "Ethan", "Daniel", "Zane"] },
+];
+
+const SUBTITLE_PRESETS = [
+  { key: "classic", label: "Classic", desc: "Montserrat · Bold · Yellow highlight" },
+  { key: "bold-pop", label: "Bold Pop", desc: "Bangers · Big · Cyan highlight" },
+  { key: "clean", label: "Clean", desc: "Inter · Minimal · Lime highlight" },
+  { key: "neon", label: "Neon", desc: "Montserrat · Glow · Pink highlight" },
+  { key: "typewriter", label: "Typewriter", desc: "Courier · Vintage · Orange highlight" },
+  { key: "impact", label: "Impact", desc: "Anton · Heavy · Red highlight" },
+];
+
+const WORD_EFFECT_MODES: { key: WordEffectMode; label: string; desc: string }[] = [
+  { key: "keep_color_only", label: "Color Only", desc: "Highlight color only" },
+  { key: "scale_pop", label: "Pop", desc: "Highlight + scale pop" },
+  { key: "glow", label: "Glow", desc: "Highlight + glow" },
+  { key: "box", label: "Box", desc: "Highlight + box" },
+  { key: "combo", label: "Combo", desc: "Pop + glow + box" },
 ];
 
 const PIPELINE_STEPS = [
@@ -101,6 +119,8 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
   const [voice, setVoice] = useState("Noah");
   const [background, setBackground] = useState("minecraft");
   const [variations, setVariations] = useState(1);
+  const [subtitlePreset, setSubtitlePreset] = useState("classic");
+  const [wordEffectMode, setWordEffectMode] = useState<WordEffectMode>("combo");
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
@@ -203,7 +223,7 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
     setStartTime(now);
 
     try {
-      const req: GenerateRequest = { topic, duration, voice, background, variations };
+      const req: GenerateRequest = { topic, duration, voice, background, subtitlePreset, wordEffectMode, variations };
       const results = await generateVideo(
         req,
         (step) => {
@@ -338,6 +358,58 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-white/70 mb-2">
+            <Type className="w-4 h-4" />
+            Subtitle Style
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {SUBTITLE_PRESETS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setSubtitlePreset(p.key)}
+                disabled={loading}
+                className={`flex flex-col items-center rounded-xl border px-3 py-3 transition-colors text-center ${
+                  subtitlePreset === p.key
+                    ? "border-primary/50 bg-primary/15"
+                    : "border-white/10 bg-surface hover:bg-white/5"
+                } disabled:opacity-50`}
+              >
+                <span className={`text-sm font-bold ${subtitlePreset === p.key ? "text-primary" : "text-white/80"}`}>
+                  {p.label}
+                </span>
+                <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{p.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-white/70 mb-2">
+            <Subtitles className="w-4 h-4" />
+            Spoken Word Effect
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {WORD_EFFECT_MODES.map((mode) => (
+              <button
+                key={mode.key}
+                onClick={() => setWordEffectMode(mode.key)}
+                disabled={loading}
+                className={`flex flex-col items-center rounded-xl border px-3 py-3 transition-colors text-center ${
+                  wordEffectMode === mode.key
+                    ? "border-primary/50 bg-primary/15"
+                    : "border-white/10 bg-surface hover:bg-white/5"
+                } disabled:opacity-50`}
+              >
+                <span className={`text-sm font-bold ${wordEffectMode === mode.key ? "text-primary" : "text-white/80"}`}>
+                  {mode.label}
+                </span>
+                <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{mode.desc}</span>
+              </button>
+            ))}
           </div>
         </div>
 

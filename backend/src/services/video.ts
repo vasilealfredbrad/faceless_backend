@@ -41,6 +41,18 @@ export interface AssembleOptions {
   jobId: string;
 }
 
+function isClipReadable(filePath: string): boolean {
+  try {
+    execSync(
+      `ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 "${filePath}"`,
+      { stdio: "pipe", timeout: 10_000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function pickRandomBackground(category: string, duration: 30 | 60): string {
   const dir = path.join(VIDEOS_DIR, category, String(duration));
   if (!fs.existsSync(dir)) {
@@ -57,8 +69,19 @@ function pickRandomBackground(category: string, duration: 30 | 60): string {
     );
   }
 
-  const pick = files[Math.floor(Math.random() * files.length)];
-  return path.join(dir, pick);
+  // Shuffle and try each clip until we find one that's readable
+  const shuffled = [...files].sort(() => Math.random() - 0.5);
+  for (const file of shuffled) {
+    const filePath = path.join(dir, file);
+    if (isClipReadable(filePath)) {
+      return filePath;
+    }
+    console.warn(`[video] Skipping corrupt clip: ${file} (moov atom missing or unreadable)`);
+  }
+
+  throw new Error(
+    `All background clips in ${dir} are corrupt or unreadable. Re-download or replace them.`
+  );
 }
 
 function spawnEncode(args: string[]): Promise<{ code: number; stderr: string }> {

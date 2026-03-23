@@ -33,6 +33,7 @@ import {
   Database,
   RotateCcw,
   ExternalLink,
+  Play,
 } from "lucide-react";
 
 interface Props {
@@ -50,7 +51,7 @@ export default function Admin({ session }: Props) {
   const navigate = useNavigate();
   const [authorized, setAuthorized] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState<"youtube" | "settings">("youtube");
+  const [activeTab, setActiveTab] = useState<"youtube" | "demo" | "settings">("youtube");
 
   // YouTube state
   const [url, setUrl] = useState("");
@@ -77,6 +78,11 @@ export default function Admin({ session }: Props) {
   const [reprocessProgress, setReprocessProgress] = useState("");
   const [reprocessError, setReprocessError] = useState("");
   const [reprocessSuccess, setReprocessSuccess] = useState("");
+
+  // Demo videos state
+  const [demoJobs, setDemoJobs] = useState<{ id: string; topic: string; voice: string; thumbnail_url: string | null; is_demo: boolean }[]>([]);
+  const [demoJobsLoading, setDemoJobsLoading] = useState(false);
+  const [demoTogglingId, setDemoTogglingId] = useState<string | null>(null);
 
   // Settings state
   const [freeTierEnabled, setFreeTierEnabled] = useState(true);
@@ -122,6 +128,26 @@ export default function Admin({ session }: Props) {
     }
   }, []);
 
+  const fetchDemoJobs = useCallback(async () => {
+    setDemoJobsLoading(true);
+    try {
+      const { data } = await import("../lib/supabase").then(m =>
+        m.supabase
+          .from("jobs")
+          .select("id,topic,voice,thumbnail_url,is_demo")
+          .eq("status", "completed")
+          .eq("is_guest", false)
+          .order("created_at", { ascending: false })
+          .limit(50)
+      );
+      setDemoJobs((data || []) as { id: string; topic: string; voice: string; thumbnail_url: string | null; is_demo: boolean }[]);
+    } catch {
+      // silent
+    } finally {
+      setDemoJobsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (authorized) {
       fetchCategories();
@@ -129,6 +155,25 @@ export default function Admin({ session }: Props) {
       loadSettings();
     }
   }, [authorized, fetchCategories, fetchSources]);
+
+  async function toggleDemo(jobId: string, newValue: boolean) {
+    setDemoTogglingId(jobId);
+    try {
+      const { BACKEND_URL } = await import("../lib/api");
+      const { supabase: sb } = await import("../lib/supabase");
+      const { data: { session: s } } = await sb.auth.getSession();
+      await fetch(`${BACKEND_URL}/api/admin/jobs/${jobId}/demo`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${s?.access_token}` },
+        body: JSON.stringify({ is_demo: newValue }),
+      });
+      setDemoJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, is_demo: newValue } : j));
+    } catch {
+      // silent
+    } finally {
+      setDemoTogglingId(null);
+    }
+  }
 
   async function loadSettings() {
     try {
@@ -263,7 +308,16 @@ export default function Admin({ session }: Props) {
               }`}
             >
               <Youtube className="w-4 h-4" />
-              Background Videos
+              Backgrounds
+            </button>
+            <button
+              onClick={() => { setActiveTab("demo"); fetchDemoJobs(); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "demo" ? "bg-primary text-white" : "bg-surface text-white/40 hover:text-white/60"
+              }`}
+            >
+              <Film className="w-4 h-4" />
+              Demo Videos
             </button>
             <button
               onClick={() => setActiveTab("settings")}
@@ -692,6 +746,76 @@ export default function Admin({ session }: Props) {
                   </div>
                 )}
               </div>
+            </>
+          )}
+
+          {activeTab === "demo" && (
+            <>
+              <div>
+                <h2 className="font-display text-3xl font-bold mb-2">
+                  Demo <span className="text-primary">Videos</span>
+                </h2>
+                <p className="text-white/40 text-sm">
+                  Select completed videos to display as demos on the homepage guest section.
+                </p>
+              </div>
+
+              {demoJobsLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                </div>
+              ) : demoJobs.length === 0 ? (
+                <div className="rounded-2xl bg-surface-card border border-white/5 p-10 text-center">
+                  <Film className="w-10 h-10 text-white/10 mx-auto mb-3" />
+                  <p className="text-white/30 text-sm">No completed videos yet</p>
+                  <p className="text-white/15 text-xs mt-1">Generate some videos from the dashboard first</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {demoJobs.map((job) => (
+                    <div
+                      key={job.id}
+                      className={`relative rounded-2xl overflow-hidden border transition-colors ${job.is_demo ? "border-primary/50" : "border-white/5"} bg-surface-card`}
+                    >
+                      <div className="aspect-[9/16] bg-black relative">
+                        {job.thumbnail_url ? (
+                          <img src={job.thumbnail_url} alt={job.topic} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Film className="w-8 h-8 text-white/10" />
+                          </div>
+                        )}
+                        {job.is_demo && (
+                          <div className="absolute top-2 left-2 bg-primary text-white text-[10px] font-bold px-2 py-1 rounded-full">
+                            DEMO
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3 space-y-2">
+                        <p className="text-xs text-white/70 line-clamp-2 leading-snug">{job.topic}</p>
+                        <p className="text-[10px] text-white/30">{job.voice}</p>
+                        <button
+                          onClick={() => toggleDemo(job.id, !job.is_demo)}
+                          disabled={demoTogglingId === job.id}
+                          className={`w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                            job.is_demo
+                              ? "bg-primary/15 text-primary hover:bg-primary/25"
+                              : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/70"
+                          }`}
+                        >
+                          {demoTogglingId === job.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : job.is_demo ? (
+                            <><CheckCircle2 className="w-3 h-3" /> Remove Demo</>
+                          ) : (
+                            <><Play className="w-3 h-3" /> Set as Demo</>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
 

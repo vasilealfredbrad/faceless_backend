@@ -10,6 +10,7 @@ import { stripeRoute } from "./routes/stripe.js";
 import { adminSettingsRoute } from "./routes/admin-settings.js";
 import { generateSignedUrl } from "./services/storage.js";
 import { register, httpRequestsTotal, httpRequestDuration } from "./services/metrics.js";
+import { VALID_SUBTITLE_PRESETS, VALID_WORD_EFFECT_MODES } from "./services/subtitles.js";
 
 const requiredEnv = [
   "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "GROQ_API_KEY", "UNREALSPEECH_API_KEY",
@@ -226,6 +227,182 @@ app.get("/health", (_req, res) => {
 app.get("/metrics", async (_req, res) => {
   res.set("Content-Type", register.contentType);
   res.end(await register.metrics());
+});
+
+// --- Demo videos (public, cached) ---
+
+let demoCache: { data: { id: string; topic: string; voice: string }[]; ts: number } | null = null;
+const DEMO_CACHE_TTL_MS = 5 * 60_000;
+
+app.get("/api/demo/videos", async (_req, res) => {
+  try {
+    if (demoCache && Date.now() - demoCache.ts < DEMO_CACHE_TTL_MS) {
+      res.set("Cache-Control", "public, max-age=300");
+      res.json({ videos: demoCache.data });
+      return;
+    }
+    const { data } = await supabase
+      .from("jobs")
+      .select("id, topic, voice")
+      .eq("status", "completed")
+      .eq("is_demo", true)
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const videos = (data || []).map((j: { id: string; topic: string; voice: string }) => ({
+      id: j.id, topic: j.topic, voice: j.voice,
+    }));
+    demoCache = { data: videos, ts: Date.now() };
+    res.set("Cache-Control", "public, max-age=300");
+    res.json({ videos });
+  } catch {
+    res.json({ videos: [] });
+  }
+});
+
+const demoMediaLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests" },
+});
+
+const demoSignedUrlCache = new Map<string, { url: string; ts: number }>();
+const DEMO_SIGNED_URL_TTL_MS = 6 * 24 * 3600_000; // refresh 1 day before expiry
+
+app.get("/api/demo/media/:jobId/:type", demoMediaLimiter, async (req, res) => {
+  const { jobId, type } = req.params;
+  if (!/^[0-9a-f-]{36}$/i.test(jobId as string)) { res.status(400).json({ error: "Invalid ID" }); return; }
+  if (type !== "video" && type !== "thumb") { res.status(400).json({ error: "Type must be video or thumb" }); return; }
+
+  const cacheKey = `${jobId}:${type}`;
+  const cached = demoSignedUrlCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < DEMO_SIGNED_URL_TTL_MS) {
+    res.redirect(302, cached.url);
+    return;
+  }
+
+  try {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("id, is_demo, is_guest")
+      .eq("id", jobId)
+      .single();
+
+    if (!job || (!job.is_demo && !job.is_guest)) { res.status(404).json({ error: "Not found" }); return; }
+
+    const file = type === "video" ? "video.mp4" : "thumb.jpg";
+    const url = await generateSignedUrl(`jobs/${jobId}/${file}`);
+    demoSignedUrlCache.set(cacheKey, { url, ts: Date.now() });
+    res.redirect(302, url);
+  } catch {
+    res.status(500).json({ error: "Failed to generate URL" });
+  }
+});
+
+// Admin: set/unset a job as demo
+app.patch("/api/admin/jobs/:jobId/demo", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const token = authHeader.slice(7);
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user) { res.status(401).json({ error: "Invalid token" }); return; }
+  const { data: profile } = await supabase.from("profiles").select("is_admin").eq("id", user.id).single();
+  if (!profile?.is_admin) { res.status(403).json({ error: "Admin only" }); return; }
+
+  const { is_demo } = req.body || {};
+  const jobId = req.params.jobId as string;
+  const { error } = await supabase.from("jobs").update({ is_demo: !!is_demo }).eq("id", jobId);
+  if (error) { res.status(500).json({ error: error.message }); return; }
+  demoCache = null;
+  res.json({ success: true });
+});
+
+const guestLimiter = rateLimit({
+  windowMs: 10 * 60_000,
+  max: 1,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "You can try one free video every 10 minutes." },
+});
+
+const GUEST_VALID_VOICES = new Set([
+  "Autumn", "Melody", "Hannah", "Emily", "Ivy", "Kaitlyn", "Luna", "Willow", "Lauren", "Sierra",
+  "Noah", "Jasper", "Caleb", "Ronan", "Ethan", "Daniel", "Zane",
+]);
+
+app.post("/api/guest/generate", guestLimiter, async (req, res) => {
+  const {
+    topic,
+    voice = "Noah",
+    background = "minecraft",
+    subtitle_preset = "classic",
+    word_effect_mode = "combo",
+  } = req.body || {};
+
+  if (!topic || typeof topic !== "string" || !topic.trim()) {
+    res.status(400).json({ error: "Topic is required" });
+    return;
+  }
+  if (!GUEST_VALID_VOICES.has(voice)) {
+    res.status(400).json({ error: "Invalid voice" });
+    return;
+  }
+  if (subtitle_preset && !VALID_SUBTITLE_PRESETS.has(subtitle_preset)) {
+    res.status(400).json({ error: "Invalid subtitle preset" });
+    return;
+  }
+  if (word_effect_mode && !VALID_WORD_EFFECT_MODES.has(word_effect_mode)) {
+    res.status(400).json({ error: "Invalid word effect mode" });
+    return;
+  }
+
+  try {
+    const { data: job, error: insertErr } = await supabase
+      .from("jobs")
+      .insert({
+        user_id: null,
+        topic: topic.trim().slice(0, 500),
+        duration: 30,
+        voice,
+        background,
+        subtitle_preset: subtitle_preset || "classic",
+        word_effect_mode: word_effect_mode || "combo",
+        status: "pending",
+        is_guest: true,
+      })
+      .select()
+      .single();
+
+    if (insertErr || !job) {
+      res.status(500).json({ error: "Failed to create guest job" });
+      return;
+    }
+
+    res.json({ jobId: job.id });
+  } catch {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/guest/job/:jobId", async (req, res) => {
+  const { jobId } = req.params;
+  if (!/^[0-9a-f-]{36}$/i.test(jobId as string)) {
+    res.status(400).json({ error: "Invalid job ID" });
+    return;
+  }
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, status, error, video_url, thumbnail_url, script")
+    .eq("id", jobId)
+    .eq("is_guest", true)
+    .single();
+
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  res.json(job);
 });
 
 app.get("/api/signed-url/:jobId/:file", signedUrlLimiter, async (req, res) => {

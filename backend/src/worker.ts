@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient, RealtimeChannel } from "@supabase/supabase-js";
 import { generateStory } from "./services/story.js";
 import { generateVoice, timeStretchAudio, scaleTimestamps } from "./services/voice.js";
-import { generateSubtitles } from "./services/subtitles.js";
+import { generateSubtitles, VALID_SUBTITLE_PRESETS, VALID_WORD_EFFECT_MODES, WordEffectMode } from "./services/subtitles.js";
 import { assembleVideo } from "./services/video.js";
 import { uploadFile } from "./services/storage.js";
 import { generateThumbnail } from "./services/thumbnail.js";
@@ -17,11 +17,14 @@ const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "10000", 10);
 interface Job {
   id: string;
   user_id: string | null;
+  is_guest: boolean;
   status: string;
   topic: string;
   duration: 30 | 60;
   voice: string;
   background: string;
+  subtitle_preset: string;
+  word_effect_mode: WordEffectMode;
   script: string | null;
   audio_url: string | null;
   subtitles_url: string | null;
@@ -45,6 +48,8 @@ function validateJob(job: Job): string | null {
   if (![30, 60].includes(job.duration)) return "Duration must be 30 or 60";
   if (!VALID_VOICES.has(job.voice)) return `Invalid voice: ${job.voice}`;
   if (!job.background || !/^[a-z0-9-]+$/i.test(job.background)) return "Invalid background category";
+  if (job.subtitle_preset && !VALID_SUBTITLE_PRESETS.has(job.subtitle_preset)) return `Invalid subtitle preset: ${job.subtitle_preset}`;
+  if (job.word_effect_mode && !VALID_WORD_EFFECT_MODES.has(job.word_effect_mode)) return `Invalid word effect mode: ${job.word_effect_mode}`;
   return null;
 }
 
@@ -235,7 +240,12 @@ export class Worker {
 
       // Step 4: Build subtitles
       await this.updateJob(job.id, { status: "building_subtitles" });
-      const assPath = await generateSubtitles(timestamps, job.id);
+      const assPath = await generateSubtitles(
+        timestamps,
+        job.id,
+        job.subtitle_preset || "classic",
+        job.word_effect_mode || "combo",
+      );
 
       // Step 5: Assemble video
       await this.updateJob(job.id, { status: "assembling_video" });
