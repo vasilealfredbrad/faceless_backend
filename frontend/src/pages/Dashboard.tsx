@@ -117,7 +117,7 @@ function VideoCard({
           <p className="text-[10px] text-white/50">{job.duration}s &middot; {job.voice}</p>
         </div>
         {isCompleted && (
-          <div className="absolute top-0 left-0 right-0 flex items-center justify-end gap-1 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute top-0 left-0 right-0 flex items-center justify-end gap-1 p-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
             <button
               onClick={(e) => { e.stopPropagation(); onShowInfo(); }}
               className="w-7 h-7 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-primary hover:bg-black/80 transition-colors"
@@ -128,7 +128,7 @@ function VideoCard({
           </div>
         )}
         {isCompleted && (
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity pointer-events-none">
             <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
               <Play className="w-5 h-5 text-white ml-0.5" />
             </div>
@@ -225,14 +225,14 @@ function VideoPlayerModal({
         </div>
 
         {/* Bottom bar */}
-        <div className="w-full mt-3 flex items-center gap-2">
+        <div className="w-full mt-3 flex items-center gap-2 flex-wrap">
           {videoUrl && (
             <a
               href={videoUrl}
               download
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"
+              className="flex-1 min-w-[170px] flex items-center justify-center gap-2 py-2.5 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"
             >
               <Download className="w-4 h-4" />
               Download
@@ -240,7 +240,7 @@ function VideoPlayerModal({
           )}
           <button
             onClick={() => setShowDetails(!showDetails)}
-            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-colors ${
+            className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-colors ${
               showDetails
                 ? "bg-primary/20 text-primary border border-primary/30"
                 : "bg-white/5 hover:bg-white/10 text-white/60"
@@ -414,7 +414,7 @@ export default function Dashboard({ session, isAdmin, onLogout }: Props) {
           </div>
 
           {profile && profile.tier === "free" && (
-            <div className="mb-6 flex items-center justify-between rounded-xl bg-primary/10 border border-primary/20 px-5 py-3">
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-primary/10 border border-primary/20 px-5 py-3">
               <span className="text-sm text-white/70">
                 <strong className="text-white">{profile.daily_videos_used}</strong> of{" "}
                 <strong className="text-white">{appSettings.free_tier_daily_limit || "15"}</strong> daily videos used

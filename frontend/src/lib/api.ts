@@ -7,6 +7,8 @@ export interface GenerateRequest {
   background: string;
   subtitlePreset?: string;
   wordEffectMode?: WordEffectMode;
+  subtitleSize?: SubtitleSize;
+  subtitleColors?: SubtitleColorOverrides;
   variations?: number;
 }
 
@@ -16,6 +18,15 @@ export type WordEffectMode =
   | "glow"
   | "box"
   | "combo";
+
+export type SubtitleSize = "small" | "medium" | "large";
+
+export interface SubtitleColorOverrides {
+  text?: string;
+  active?: string;
+  outline?: string;
+  box?: string;
+}
 
 export interface GenerateResponse {
   jobId: string;
@@ -57,6 +68,24 @@ function isWordEffectModeSchemaCacheError(message?: string): boolean {
   return message.includes("word_effect_mode") && message.includes("schema cache");
 }
 
+function isSubtitleSizeSchemaCacheError(message?: string): boolean {
+  if (!message) return false;
+  return message.includes("subtitle_size") && message.includes("schema cache");
+}
+
+function isSubtitleColorSchemaCacheError(message?: string): boolean {
+  if (!message) return false;
+  return (
+    message.includes("schema cache") &&
+    (
+      message.includes("subtitle_color_text") ||
+      message.includes("subtitle_color_active") ||
+      message.includes("subtitle_color_outline") ||
+      message.includes("subtitle_color_box")
+    )
+  );
+}
+
 export async function generateVideo(
   req: GenerateRequest,
   onProgress?: (step: string) => void,
@@ -85,6 +114,11 @@ export async function generateVideo(
     background: req.background,
     subtitle_preset: req.subtitlePreset || "classic",
     word_effect_mode: req.wordEffectMode || "combo",
+    subtitle_size: req.subtitleSize || "medium",
+    subtitle_color_text: req.subtitleColors?.text || null,
+    subtitle_color_active: req.subtitleColors?.active || null,
+    subtitle_color_outline: req.subtitleColors?.outline || null,
+    subtitle_color_box: req.subtitleColors?.box || null,
     status: "pending" as const,
   }));
 
@@ -98,6 +132,26 @@ export async function generateVideo(
   if (insertError && isWordEffectModeSchemaCacheError(insertError.message)) {
     // Backward-compatible retry while DB migration rolls out.
     const fallbackRows = rows.map(({ word_effect_mode: _ignored, ...row }) => row);
+    const retry = await supabase.from("jobs").insert(fallbackRows).select();
+    finalJobs = retry.data;
+    finalError = retry.error;
+  }
+  if (finalError && isSubtitleSizeSchemaCacheError(finalError.message)) {
+    // Backward-compatible retry while DB migration rolls out.
+    const fallbackRows = rows.map(({ subtitle_size: _ignored, ...row }) => row);
+    const retry = await supabase.from("jobs").insert(fallbackRows).select();
+    finalJobs = retry.data;
+    finalError = retry.error;
+  }
+  if (finalError && isSubtitleColorSchemaCacheError(finalError.message)) {
+    // Backward-compatible retry while DB migration rolls out.
+    const fallbackRows = rows.map(({
+      subtitle_color_text: _t,
+      subtitle_color_active: _a,
+      subtitle_color_outline: _o,
+      subtitle_color_box: _b,
+      ...row
+    }) => row);
     const retry = await supabase.from("jobs").insert(fallbackRows).select();
     finalJobs = retry.data;
     finalError = retry.error;
@@ -218,6 +272,11 @@ export interface JobRecord {
   background: string;
   subtitle_preset: string;
   word_effect_mode: WordEffectMode;
+  subtitle_size: SubtitleSize;
+  subtitle_color_text: string | null;
+  subtitle_color_active: string | null;
+  subtitle_color_outline: string | null;
+  subtitle_color_box: string | null;
   script: string | null;
   video_url: string | null;
   thumbnail_url: string | null;

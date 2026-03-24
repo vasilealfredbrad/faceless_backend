@@ -16,16 +16,16 @@ export default function Navbar({ session, isAdmin, onOpenAuth, onLogout }: Navba
   const isPricing = location.pathname === "/pricing";
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-white/5">
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2">
-          <Video className="w-7 h-7 text-primary" />
-          <span className="font-display text-xl font-bold tracking-tight">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-white/5 pt-[env(safe-area-inset-top)]">
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 h-16 flex items-center justify-between gap-2 min-w-0">
+        <Link to="/" className="flex items-center gap-2 min-w-0">
+          <Video className="w-6 h-6 sm:w-7 sm:h-7 text-primary shrink-0" />
+          <span className="font-display text-base sm:text-xl font-bold tracking-tight truncate max-w-[150px] sm:max-w-none">
             Invisible Creator<span className="text-primary">.video</span>
           </span>
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
           {location.pathname !== "/" && (
             <Link
               to="/"
@@ -80,26 +80,26 @@ export default function Navbar({ session, isAdmin, onOpenAuth, onLogout }: Navba
           {session ? (
             <button
               onClick={onLogout}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white/70 hover:text-white border border-white/10 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-sm text-white/70 hover:text-white border border-white/10 rounded-lg transition-colors"
             >
               <LogOut className="w-4 h-4" />
-              Log Out
+              <span className="hidden sm:inline">Log Out</span>
             </button>
           ) : (
             <>
               <button
                 onClick={() => onOpenAuth("login")}
-                className="flex items-center gap-2 px-4 py-2 text-sm text-white/70 hover:text-white border border-white/10 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-sm text-white/70 hover:text-white border border-white/10 rounded-lg transition-colors"
               >
                 <LogIn className="w-4 h-4" />
-                Login
+                <span className="hidden sm:inline">Login</span>
               </button>
               <button
                 onClick={() => onOpenAuth("register")}
-                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-primary hover:bg-primary-dark text-white rounded-lg transition-colors"
+                className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-5 py-2 text-sm font-semibold bg-primary hover:bg-primary-dark text-white rounded-lg transition-colors"
               >
                 <UserPlus className="w-4 h-4" />
-                Sign Up
+                <span className="hidden sm:inline">Sign Up</span>
               </button>
             </>
           )}

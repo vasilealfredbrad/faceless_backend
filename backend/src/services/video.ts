@@ -5,6 +5,7 @@ import path from "path";
 const VIDEOS_DIR = path.resolve(process.cwd(), "videos");
 const GENERATED_DIR = path.resolve(process.cwd(), "generated");
 const VAAPI_DEVICE = "/dev/dri/renderD128";
+const MOBILE_COMPAT_MODE = process.env.MOBILE_COMPAT_MODE === "1";
 
 let _vaapiChecked = false;
 let _vaapiAvailable = false;
@@ -94,9 +95,17 @@ function spawnEncode(args: string[]): Promise<{ code: number; stderr: string }> 
   });
 }
 
+function mobileCompatVideoSettings(): { profile: string; level: string; fps: string } {
+  if (MOBILE_COMPAT_MODE) {
+    return { profile: "main", level: "4.0", fps: "30" };
+  }
+  return { profile: "high", level: "4.2", fps: "60" };
+}
+
 function vaapiArgs(
   bgPath: string, audioPath: string, assPath: string, duration: number, outputPath: string,
 ): string[] {
+  const settings = mobileCompatVideoSettings();
   const filterComplex = [
     `[0:v]scale_vaapi=w=1080:h=1920:force_original_aspect_ratio=increase:force_divisible_by=2`,
     `hwdownload,format=nv12`,
@@ -124,9 +133,9 @@ function vaapiArgs(
     "-bf", "0",
     "-async_depth", "8",
     "-compression_level", "0",
-    "-profile:v", "high",
-    "-level", "4.2",
-    "-r", "60",
+    "-profile:v", settings.profile,
+    "-level", settings.level,
+    "-r", settings.fps,
     "-c:a", "aac", "-b:a", "192k",
     "-threads", "10",
     "-filter_threads", "10",
@@ -139,6 +148,7 @@ function vaapiArgs(
 function softwareArgs(
   bgPath: string, audioPath: string, assPath: string, duration: number, outputPath: string,
 ): string[] {
+  const settings = mobileCompatVideoSettings();
   const filterComplex = [
     `[0:v]scale=1080:1920:force_original_aspect_ratio=increase`,
     `crop=1080:1920`,
@@ -155,10 +165,10 @@ function softwareArgs(
     "-c:v", "libx264",
     "-crf", "18",
     "-preset", "fast",
-    "-profile:v", "high",
-    "-level", "4.2",
+    "-profile:v", settings.profile,
+    "-level", settings.level,
     "-pix_fmt", "yuv420p",
-    "-r", "60",
+    "-r", settings.fps,
     "-c:a", "aac", "-b:a", "192k",
     "-threads", "0",
     "-t", String(duration),
@@ -176,6 +186,9 @@ async function runEncode(
 ): Promise<string> {
   const outputFilename = path.basename(outputPath);
   const useVaapi = hasVaapi();
+  if (MOBILE_COMPAT_MODE) {
+    console.log("[video] MOBILE_COMPAT_MODE=1 enabled (Main profile, level 4.0, 30fps)");
+  }
 
   if (useVaapi) {
     const args = vaapiArgs(bgPath, audioPath, assPath, duration, outputPath);

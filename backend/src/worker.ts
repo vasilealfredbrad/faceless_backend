@@ -1,7 +1,15 @@
 import { createClient, SupabaseClient, RealtimeChannel } from "@supabase/supabase-js";
 import { generateStory } from "./services/story.js";
 import { generateVoice, timeStretchAudio, scaleTimestamps } from "./services/voice.js";
-import { generateSubtitles, VALID_SUBTITLE_PRESETS, VALID_WORD_EFFECT_MODES, WordEffectMode } from "./services/subtitles.js";
+import {
+  generateSubtitles,
+  SubtitleColorOverrides,
+  VALID_SUBTITLE_PRESETS,
+  VALID_SUBTITLE_SIZES,
+  VALID_WORD_EFFECT_MODES,
+  SubtitleSize,
+  WordEffectMode,
+} from "./services/subtitles.js";
 import { assembleVideo } from "./services/video.js";
 import { uploadFile } from "./services/storage.js";
 import { generateThumbnail } from "./services/thumbnail.js";
@@ -25,6 +33,11 @@ interface Job {
   background: string;
   subtitle_preset: string;
   word_effect_mode: WordEffectMode;
+  subtitle_size: SubtitleSize;
+  subtitle_color_text: string | null;
+  subtitle_color_active: string | null;
+  subtitle_color_outline: string | null;
+  subtitle_color_box: string | null;
   script: string | null;
   audio_url: string | null;
   subtitles_url: string | null;
@@ -43,6 +56,8 @@ const VALID_VOICES = new Set([
 ]);
 
 function validateJob(job: Job): string | null {
+  const isHexColor = (value: string) => /^#[0-9A-F]{6}$/i.test(value);
+
   if (!job.topic || job.topic.length > 500) return "Invalid topic";
   if (containsProfanity(job.topic)) return "Topic contains inappropriate language";
   if (![30, 60].includes(job.duration)) return "Duration must be 30 or 60";
@@ -50,6 +65,11 @@ function validateJob(job: Job): string | null {
   if (!job.background || !/^[a-z0-9-]+$/i.test(job.background)) return "Invalid background category";
   if (job.subtitle_preset && !VALID_SUBTITLE_PRESETS.has(job.subtitle_preset)) return `Invalid subtitle preset: ${job.subtitle_preset}`;
   if (job.word_effect_mode && !VALID_WORD_EFFECT_MODES.has(job.word_effect_mode)) return `Invalid word effect mode: ${job.word_effect_mode}`;
+  if (job.subtitle_size && !VALID_SUBTITLE_SIZES.has(job.subtitle_size)) return `Invalid subtitle size: ${job.subtitle_size}`;
+  if (job.subtitle_color_text && !isHexColor(job.subtitle_color_text)) return "Invalid subtitle text color";
+  if (job.subtitle_color_active && !isHexColor(job.subtitle_color_active)) return "Invalid subtitle active color";
+  if (job.subtitle_color_outline && !isHexColor(job.subtitle_color_outline)) return "Invalid subtitle outline color";
+  if (job.subtitle_color_box && !isHexColor(job.subtitle_color_box)) return "Invalid subtitle box color";
   return null;
 }
 
@@ -240,11 +260,19 @@ export class Worker {
 
       // Step 4: Build subtitles
       await this.updateJob(job.id, { status: "building_subtitles" });
+      const subtitleColors: SubtitleColorOverrides = {
+        text: job.subtitle_color_text,
+        active: job.subtitle_color_active,
+        outline: job.subtitle_color_outline,
+        box: job.subtitle_color_box,
+      };
       const assPath = await generateSubtitles(
         timestamps,
         job.id,
         job.subtitle_preset || "classic",
         job.word_effect_mode || "combo",
+        job.subtitle_size || "medium",
+        subtitleColors,
       );
 
       // Step 5: Assemble video

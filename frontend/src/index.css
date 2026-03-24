@@ -14,6 +14,16 @@
   --color-surface-hover: #253256;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-primary) transparent;
@@ -22,6 +32,7 @@
 body {
   @apply bg-surface text-white font-sans antialiased;
   margin: 0;
+  overflow-x: hidden;
 }
 
 @keyframes marquee {

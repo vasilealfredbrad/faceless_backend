@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Session } from "@supabase/supabase-js";
-import { generateVideo, GenerateRequest, getCategories, CategoryInfo, BulkProgress, WordEffectMode } from "../lib/api";
+import { generateVideo, GenerateRequest, getCategories, CategoryInfo, BulkProgress, WordEffectMode, SubtitleSize } from "../lib/api";
 import { containsProfanity } from "../lib/profanity";
 import VOICE_DEMO_FILES from "../lib/voice-demos";
 import {
@@ -44,6 +44,43 @@ const WORD_EFFECT_MODES: { key: WordEffectMode; label: string; desc: string }[] 
   { key: "box", label: "Box", desc: "Highlight + box" },
   { key: "combo", label: "Combo", desc: "Pop + glow + box" },
 ];
+
+const WORD_EFFECT_PREVIEW_TEXT = {
+  left: "THIS",
+  active: "WORD",
+  right: "NOW",
+} as const;
+
+const SUBTITLE_SIZES: { key: SubtitleSize; label: string; desc: string }[] = [
+  { key: "small", label: "Small", desc: "Compact text" },
+  { key: "medium", label: "Medium", desc: "Balanced size" },
+  { key: "large", label: "Large", desc: "Bigger text" },
+];
+
+interface SubtitleColorState {
+  text: string;
+  active: string;
+  outline: string;
+  box: string;
+}
+
+const PRESET_COLOR_DEFAULTS: Record<string, SubtitleColorState> = {
+  classic: { text: "#FFFFFF", active: "#FFD700", outline: "#000000", box: "#222222" },
+  "bold-pop": { text: "#FFFFFF", active: "#00FFFF", outline: "#000000", box: "#111111" },
+  clean: { text: "#FFFFFF", active: "#77FF33", outline: "#000000", box: "#111111" },
+  neon: { text: "#FFFFFF", active: "#FF6699", outline: "#DD44FF", box: "#220022" },
+  typewriter: { text: "#FFFFFF", active: "#FF8800", outline: "#222222", box: "#111111" },
+  impact: { text: "#FFFFFF", active: "#FF4444", outline: "#000000", box: "#1A1A1A" },
+};
+
+const PRESET_PREVIEW_STYLE: Record<string, { fontFamily: string; fontSize: string; fontWeight: number; letterSpacing?: string }> = {
+  classic: { fontFamily: "Montserrat, sans-serif", fontSize: "17px", fontWeight: 800, letterSpacing: "0.02em" },
+  "bold-pop": { fontFamily: "Bangers, Impact, sans-serif", fontSize: "20px", fontWeight: 700, letterSpacing: "0.03em" },
+  clean: { fontFamily: "Inter, sans-serif", fontSize: "16px", fontWeight: 600 },
+  neon: { fontFamily: "Montserrat, sans-serif", fontSize: "17px", fontWeight: 800, letterSpacing: "0.02em" },
+  typewriter: { fontFamily: "\"Courier Prime\", \"Courier New\", monospace", fontSize: "16px", fontWeight: 700 },
+  impact: { fontFamily: "Anton, Impact, sans-serif", fontSize: "19px", fontWeight: 700, letterSpacing: "0.03em" },
+};
 
 const PIPELINE_STEPS = [
   { key: "script", label: "Generating Script", icon: FileText, match: "script" },
@@ -121,6 +158,10 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
   const [variations, setVariations] = useState(1);
   const [subtitlePreset, setSubtitlePreset] = useState("classic");
   const [wordEffectMode, setWordEffectMode] = useState<WordEffectMode>("combo");
+  const [subtitleSize, setSubtitleSize] = useState<SubtitleSize>("medium");
+  const [subtitleColors, setSubtitleColors] = useState<SubtitleColorState>(PRESET_COLOR_DEFAULTS.classic);
+  const [previewPreset, setPreviewPreset] = useState<string | null>(null);
+  const [previewWordEffect, setPreviewWordEffect] = useState<WordEffectMode | null>(null);
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
@@ -148,6 +189,10 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
     }, 100);
     return () => clearInterval(interval);
   }, [loading]);
+
+  useEffect(() => {
+    setSubtitleColors(PRESET_COLOR_DEFAULTS[subtitlePreset] || PRESET_COLOR_DEFAULTS.classic);
+  }, [subtitlePreset]);
 
   useEffect(() => {
     for (const [, url] of Object.entries(VOICE_DEMO_FILES)) {
@@ -223,7 +268,17 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
     setStartTime(now);
 
     try {
-      const req: GenerateRequest = { topic, duration, voice, background, subtitlePreset, wordEffectMode, variations };
+      const req: GenerateRequest = {
+        topic,
+        duration,
+        voice,
+        background,
+        subtitlePreset,
+        wordEffectMode,
+        subtitleSize,
+        subtitleColors,
+        variations,
+      };
       const results = await generateVideo(
         req,
         (step) => {
@@ -262,6 +317,14 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
 
   return (
     <div className="space-y-5">
+      <style>{`
+        @keyframes subtitlePopDemo {
+          0% { transform: scale(1); }
+          35% { transform: scale(1.22); }
+          65% { transform: scale(1.08); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
       <div className="rounded-2xl bg-surface-card border border-white/5 p-6 space-y-5">
         <div>
           <div className="flex items-center justify-between gap-3 mb-2">
@@ -368,21 +431,61 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {SUBTITLE_PRESETS.map((p) => (
-              <button
+              <div
                 key={p.key}
-                onClick={() => setSubtitlePreset(p.key)}
-                disabled={loading}
-                className={`flex flex-col items-center rounded-xl border px-3 py-3 transition-colors text-center ${
-                  subtitlePreset === p.key
-                    ? "border-primary/50 bg-primary/15"
-                    : "border-white/10 bg-surface hover:bg-white/5"
-                } disabled:opacity-50`}
+                className="relative"
+                onMouseEnter={() => setPreviewPreset(p.key)}
+                onMouseLeave={() => setPreviewPreset((curr) => (curr === p.key ? null : curr))}
               >
-                <span className={`text-sm font-bold ${subtitlePreset === p.key ? "text-primary" : "text-white/80"}`}>
-                  {p.label}
-                </span>
-                <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{p.desc}</span>
-              </button>
+                <button
+                  onClick={() => setSubtitlePreset(p.key)}
+                  onFocus={() => setPreviewPreset(p.key)}
+                  onBlur={() => setPreviewPreset((curr) => (curr === p.key ? null : curr))}
+                  disabled={loading}
+                  className={`w-full flex flex-col items-center rounded-xl border px-3 py-3 transition-colors text-center ${
+                    subtitlePreset === p.key
+                      ? "border-primary/50 bg-primary/15"
+                      : "border-white/10 bg-surface hover:bg-white/5"
+                  } disabled:opacity-50`}
+                >
+                  <span className={`text-sm font-bold ${subtitlePreset === p.key ? "text-primary" : "text-white/80"}`}>
+                    {p.label}
+                  </span>
+                  <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{p.desc}</span>
+                </button>
+
+                {previewPreset === p.key && (
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-30 w-56 rounded-xl border border-white/15 bg-[#0f1016] p-3 shadow-2xl">
+                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-2">Preview</p>
+                    <div
+                      className="rounded-lg border border-white/10 px-3 py-2 text-center"
+                      style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+                    >
+                      <span
+                        style={{
+                          ...PRESET_PREVIEW_STYLE[p.key],
+                          color: PRESET_COLOR_DEFAULTS[p.key].text,
+                          textShadow: `0 0 2px ${PRESET_COLOR_DEFAULTS[p.key].outline}, 0 0 6px ${PRESET_COLOR_DEFAULTS[p.key].outline}`,
+                        }}
+                      >
+                        THIS{" "}
+                        <span
+                          style={{
+                            color: PRESET_COLOR_DEFAULTS[p.key].active,
+                            backgroundColor: PRESET_COLOR_DEFAULTS[p.key].box,
+                            borderRadius: "5px",
+                            padding: "0 6px",
+                            boxShadow: `0 0 8px ${PRESET_COLOR_DEFAULTS[p.key].outline}`,
+                          }}
+                        >
+                          STYLE
+                        </span>{" "}
+                        LOOKS GOOD
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -394,22 +497,169 @@ export default function VideoGenerator({ session, onNeedAuth, onVideoGenerated }
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             {WORD_EFFECT_MODES.map((mode) => (
-              <button
+              <div
                 key={mode.key}
-                onClick={() => setWordEffectMode(mode.key)}
+                className="relative"
+                onMouseEnter={() => setPreviewWordEffect(mode.key)}
+                onMouseLeave={() => setPreviewWordEffect((curr) => (curr === mode.key ? null : curr))}
+              >
+                <button
+                  onClick={() => setWordEffectMode(mode.key)}
+                  onFocus={() => setPreviewWordEffect(mode.key)}
+                  onBlur={() => setPreviewWordEffect((curr) => (curr === mode.key ? null : curr))}
+                  disabled={loading}
+                  className={`w-full flex flex-col items-center rounded-xl border px-3 py-3 transition-colors text-center ${
+                    wordEffectMode === mode.key
+                      ? "border-primary/50 bg-primary/15"
+                      : "border-white/10 bg-surface hover:bg-white/5"
+                  } disabled:opacity-50`}
+                >
+                  <span className={`text-sm font-bold ${wordEffectMode === mode.key ? "text-primary" : "text-white/80"}`}>
+                    {mode.label}
+                  </span>
+                  <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{mode.desc}</span>
+                </button>
+
+                {previewWordEffect === mode.key && (
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-30 w-52 rounded-xl border border-white/15 bg-[#0f1016] p-3 shadow-2xl">
+                    <p className="text-[10px] uppercase tracking-wider text-white/40 mb-2">Preview</p>
+                    <div className="rounded-lg border border-white/10 px-3 py-2 text-center bg-black/45">
+                      <span className="text-sm font-extrabold text-white/85">{WORD_EFFECT_PREVIEW_TEXT.left} </span>
+                      <span
+                        className="text-sm font-extrabold"
+                        style={{
+                          color: subtitleColors.active,
+                          transform:
+                            mode.key === "scale_pop" || mode.key === "combo" ? "scale(1.14)" : "scale(1)",
+                          display: "inline-block",
+                          animation:
+                            mode.key === "scale_pop" || mode.key === "combo"
+                              ? "subtitlePopDemo 900ms ease-in-out infinite"
+                              : "none",
+                          textShadow:
+                            mode.key === "glow" || mode.key === "combo"
+                              ? `0 0 2px ${subtitleColors.outline}, 0 0 8px ${subtitleColors.outline}`
+                              : "none",
+                          backgroundColor:
+                            mode.key === "box" || mode.key === "combo"
+                              ? subtitleColors.box
+                              : "transparent",
+                          borderRadius:
+                            mode.key === "box" || mode.key === "combo" ? "5px" : "0",
+                          padding:
+                            mode.key === "box" || mode.key === "combo" ? "0 6px" : "0",
+                        }}
+                      >
+                        {WORD_EFFECT_PREVIEW_TEXT.active}
+                      </span>
+                      <span className="text-sm font-extrabold text-white/85"> {WORD_EFFECT_PREVIEW_TEXT.right}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-white/70 mb-2">
+            <Type className="w-4 h-4" />
+            Subtitle Size
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {SUBTITLE_SIZES.map((size) => (
+              <button
+                key={size.key}
+                onClick={() => setSubtitleSize(size.key)}
                 disabled={loading}
                 className={`flex flex-col items-center rounded-xl border px-3 py-3 transition-colors text-center ${
-                  wordEffectMode === mode.key
+                  subtitleSize === size.key
                     ? "border-primary/50 bg-primary/15"
                     : "border-white/10 bg-surface hover:bg-white/5"
                 } disabled:opacity-50`}
               >
-                <span className={`text-sm font-bold ${wordEffectMode === mode.key ? "text-primary" : "text-white/80"}`}>
-                  {mode.label}
+                <span className={`text-sm font-bold ${subtitleSize === size.key ? "text-primary" : "text-white/80"}`}>
+                  {size.label}
                 </span>
-                <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{mode.desc}</span>
+                <span className="text-[10px] text-white/35 mt-0.5 leading-tight">{size.desc}</span>
               </button>
             ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-white/70 mb-2">
+            <Type className="w-4 h-4" />
+            Subtitle Colors
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { key: "text" as const, label: "Text Color" },
+              { key: "active" as const, label: "Active Word" },
+              { key: "outline" as const, label: "Outline/Glow" },
+              { key: "box" as const, label: "Box Color" },
+            ].map((item) => (
+              <label
+                key={item.key}
+                className="flex items-center gap-2 rounded-xl border border-white/10 bg-surface px-3 py-2"
+              >
+                <input
+                  type="color"
+                  value={subtitleColors[item.key]}
+                  onChange={(e) => setSubtitleColors((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                  disabled={loading}
+                  className="h-8 w-8 rounded border border-white/10 bg-transparent"
+                />
+                <span className="text-xs text-white/75 font-medium">{item.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 rounded-xl border border-white/10 bg-[#0f1016] p-3">
+            <p className="text-[10px] uppercase tracking-wider text-white/40 mb-2">Live color preview</p>
+            <div className="rounded-lg border border-white/10 px-3 py-2 text-center bg-black/45">
+              <span
+                className="text-sm font-extrabold"
+                style={{
+                  color: subtitleColors.text,
+                  textShadow: `0 0 2px ${subtitleColors.outline}, 0 0 6px ${subtitleColors.outline}`,
+                }}
+              >
+                THIS{" "}
+              </span>
+              <span
+                className="text-sm font-extrabold inline-block"
+                style={{
+                  color: subtitleColors.active,
+                  textShadow:
+                    wordEffectMode === "glow" || wordEffectMode === "combo"
+                      ? `0 0 2px ${subtitleColors.outline}, 0 0 8px ${subtitleColors.outline}`
+                      : "none",
+                  backgroundColor:
+                    wordEffectMode === "box" || wordEffectMode === "combo"
+                      ? subtitleColors.box
+                      : "transparent",
+                  borderRadius:
+                    wordEffectMode === "box" || wordEffectMode === "combo" ? "5px" : "0",
+                  padding:
+                    wordEffectMode === "box" || wordEffectMode === "combo" ? "0 6px" : "0",
+                  animation:
+                    wordEffectMode === "scale_pop" || wordEffectMode === "combo"
+                      ? "subtitlePopDemo 900ms ease-in-out infinite"
+                      : "none",
+                }}
+              >
+                COLOR
+              </span>
+              <span
+                className="text-sm font-extrabold"
+                style={{
+                  color: subtitleColors.text,
+                  textShadow: `0 0 2px ${subtitleColors.outline}, 0 0 6px ${subtitleColors.outline}`,
+                }}
+              >
+                {" "}DEMO
+              </span>
+            </div>
           </div>
         </div>
 

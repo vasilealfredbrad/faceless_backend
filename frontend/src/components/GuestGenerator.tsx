@@ -125,6 +125,7 @@ export default function GuestGenerator() {
   const genStartedAtRef = useRef<number | null>(null);
   const [liveElapsedSec, setLiveElapsedSec] = useState(0);
   const [finalElapsedSec, setFinalElapsedSec] = useState<number | null>(null);
+  const demoVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     getDemoVideos().then(setDemos).catch(() => {});
@@ -193,6 +194,19 @@ export default function GuestGenerator() {
     }, 100);
     return () => window.clearInterval(id);
   }, [loading]);
+
+  useEffect(() => {
+    if (!playing) return;
+    const video = demoVideoRef.current;
+    if (!video) return;
+    video.muted = true;
+    const p = video.play();
+    if (p) {
+      p.then(() => {
+        video.muted = false;
+      }).catch(() => {});
+    }
+  }, [playing, demoIdx, current?.id]);
 
   const isResultShowing = !!(result && result.video_url);
 
@@ -307,12 +321,13 @@ export default function GuestGenerator() {
                 <>
                   {playing ? (
                     <video
+                      ref={demoVideoRef}
                       key={`video-${current.id}`}
                       src={demoVideoUrl(current)}
                       className="w-full h-full object-cover"
                       controls
-                      autoPlay
                       playsInline
+                      preload="metadata"
                     />
                   ) : (
                     <>

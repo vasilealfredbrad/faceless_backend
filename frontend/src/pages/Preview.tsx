@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { getSignedVideoUrl as getFreshSignedVideoUrl } from "../lib/api";
 import { Play, ArrowLeft, Download, Loader2, LogIn } from "lucide-react";
 
 interface Job {
@@ -15,28 +16,15 @@ interface Job {
   created_at: string;
 }
 
-async function getSignedVideoUrl(jobId: string): Promise<string | null> {
-  try {
-    const headers: Record<string, string> = {};
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      headers["Authorization"] = `Bearer ${session.access_token}`;
-    }
-    const res = await fetch(`/api/signed-url?jobId=${encodeURIComponent(jobId)}&file=video.mp4`, { headers });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.url || null;
-  } catch {
-    return null;
-  }
-}
-
 export default function Preview() {
   const { jobId } = useParams<{ jobId: string }>();
   const [job, setJob] = useState<Job | null>(null);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [videoError, setVideoError] = useState<string>("");
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -68,7 +56,7 @@ export default function Preview() {
       if (!cancelled) setLoading(false);
 
       if (data.status === "completed" && data.video_url) {
-        const signed = await getSignedVideoUrl(jobId!);
+        const signed = await getFreshSignedVideoUrl(jobId!);
         if (!cancelled) setVideoSrc(signed || data.video_url);
       }
 
@@ -87,7 +75,7 @@ export default function Preview() {
               const updated = payload.new as Job;
               if (!cancelled) setJob(updated);
               if (updated.status === "completed" && updated.video_url) {
-                const signed = await getSignedVideoUrl(jobId!);
+                const signed = await getFreshSignedVideoUrl(jobId!);
                 if (!cancelled) setVideoSrc(signed || updated.video_url);
               }
             }
@@ -105,6 +93,24 @@ export default function Preview() {
 
     return () => { cancelled = true; };
   }, [jobId]);
+
+  useEffect(() => {
+    if (job?.status !== "completed" || !videoSrc || !videoRef.current) return;
+    const video = videoRef.current;
+    setVideoError("");
+    setAutoplayBlocked(false);
+    video.muted = true;
+    const playPromise = video.play();
+    if (playPromise) {
+      playPromise
+        .then(() => {
+          video.muted = false;
+        })
+        .catch(() => {
+          setAutoplayBlocked(true);
+        });
+    }
+  }, [job?.status, videoSrc]);
 
   if (loading) {
     return (
@@ -148,9 +154,9 @@ export default function Preview() {
   const isProcessing = job.status !== "completed" && job.status !== "failed";
 
   return (
-    <div className="min-h-screen bg-surface">
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-surface overflow-x-hidden">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-white/5 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between min-w-0">
           <Link
             to="/dashboard"
             className="flex items-center gap-2 text-white/60 hover:text-white transition-colors text-sm"
@@ -185,23 +191,31 @@ export default function Preview() {
 
           {job.status === "completed" && videoSrc && (
             <>
-              <div className="rounded-2xl overflow-hidden border border-white/10 bg-black w-fit mx-auto">
+              <div className="rounded-2xl overflow-hidden border border-white/10 bg-black w-full max-w-[390px] mx-auto">
                 <video
+                  ref={videoRef}
                   src={videoSrc}
                   controls
-                  autoPlay
-                  className="w-auto max-h-[70vh] mx-auto"
+                  playsInline
+                  preload="metadata"
+                  className="w-full h-auto max-h-[70svh] mx-auto"
                   style={{ aspectRatio: "9/16" }}
+                  onError={() => setVideoError("Video playback failed on this device. Please tap play or use Download.")}
                 />
               </div>
+              {(autoplayBlocked || videoError) && (
+                <p className="text-xs text-amber-300/80 text-center">
+                  {videoError || "Autoplay was blocked on this device. Tap play to start the video."}
+                </p>
+              )}
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
                 <a
                   href={videoSrc}
                   download={`invisiblecreator-${job.id}.mp4`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"
+                  className="flex-1 min-w-[180px] flex items-center justify-center gap-2 py-3 bg-accent/15 hover:bg-accent/25 text-accent font-semibold rounded-xl transition-colors text-sm"
                 >
                   <Download className="w-4 h-4" />
                   Download

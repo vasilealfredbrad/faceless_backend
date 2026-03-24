@@ -15,6 +15,15 @@ export type WordEffectMode =
   | "box"
   | "combo";
 
+export type SubtitleSize = "small" | "medium" | "large";
+
+export interface SubtitleColorOverrides {
+  text?: string | null;
+  active?: string | null;
+  outline?: string | null;
+  box?: string | null;
+}
+
 export interface SubtitlePresetConfig {
   fontname: string;
   fontsize: number;
@@ -153,6 +162,7 @@ export const VALID_WORD_EFFECT_MODES = new Set<WordEffectMode>([
   "box",
   "combo",
 ]);
+export const VALID_SUBTITLE_SIZES = new Set<SubtitleSize>(["small", "medium", "large"]);
 
 // ── Internals ─────────────────────────────────────────────────────────
 
@@ -227,11 +237,48 @@ function normalizeAssAlpha(alpha: string): string {
   return "&H00&";
 }
 
+function hexToAssBgr(hex: string): string {
+  const normalized = hex.trim().toUpperCase();
+  const match = normalized.match(/^#([0-9A-F]{6})$/);
+  if (!match) return "FFFFFF";
+  const rgb = match[1];
+  const rr = rgb.slice(0, 2);
+  const gg = rgb.slice(2, 4);
+  const bb = rgb.slice(4, 6);
+  return `${bb}${gg}${rr}`;
+}
+
+function assStyleColourFromHex(hex: string, alpha: string = "00"): string {
+  return `&H${alpha}${hexToAssBgr(hex)}`;
+}
+
+function assTagColourFromHex(hex: string): string {
+  return `&H${hexToAssBgr(hex)}&`;
+}
+
 function styleAlphaFromColour(styleColour: string): string {
   const cleaned = styleColour.trim().toUpperCase();
   const argb = cleaned.match(/^&H([0-9A-F]{8})$/);
   if (argb) return `&H${argb[1].slice(0, 2)}&`;
   return "&H00&";
+}
+
+function scaleFontSize(base: number, size: SubtitleSize): number {
+  const multipliers: Record<SubtitleSize, number> = {
+    small: 0.88,
+    medium: 1.0,
+    large: 1.35,
+  };
+  return Math.max(1, Math.round(base * multipliers[size]));
+}
+
+function scaleStyleMetric(base: number, size: SubtitleSize): number {
+  const multipliers: Record<SubtitleSize, number> = {
+    small: 0.9,
+    medium: 1.0,
+    large: 1.2,
+  };
+  return Math.max(0, Math.round(base * multipliers[size]));
 }
 
 function buildActiveWordTag(cfg: SubtitlePresetConfig, mode: WordEffectMode): string {
@@ -320,34 +367,58 @@ export async function generateSubtitles(
   jobId: string,
   preset: string = "classic",
   wordEffectMode: WordEffectMode = "combo",
+  subtitleSize: SubtitleSize = "medium",
+  colorOverrides: SubtitleColorOverrides = {},
 ): Promise<string> {
-  const cfg = SUBTITLE_PRESETS[preset] || SUBTITLE_PRESETS.classic;
+  const baseCfg = SUBTITLE_PRESETS[preset] || SUBTITLE_PRESETS.classic;
+  const baseBackAlpha = styleAlphaFromColour(baseCfg.backColour).replace(/[^0-9A-F]/gi, "");
+  const resolvedCfg: SubtitlePresetConfig = {
+    ...baseCfg,
+    primaryColour: colorOverrides.text ? assStyleColourFromHex(colorOverrides.text) : baseCfg.primaryColour,
+    highlightColour: colorOverrides.active ? assTagColourFromHex(colorOverrides.active) : baseCfg.highlightColour,
+    outlineColour: colorOverrides.outline
+      ? assStyleColourFromHex(colorOverrides.outline)
+      : baseCfg.outlineColour,
+    activeOutlineColour: colorOverrides.outline
+      ? assTagColourFromHex(colorOverrides.outline)
+      : baseCfg.activeOutlineColour,
+    backColour: colorOverrides.box
+      ? assStyleColourFromHex(colorOverrides.box, baseBackAlpha || "00")
+      : baseCfg.backColour,
+    activeBackColour: colorOverrides.box
+      ? assTagColourFromHex(colorOverrides.box)
+      : baseCfg.activeBackColour,
+  };
+
+  const scaledFontSize = scaleFontSize(resolvedCfg.fontsize, subtitleSize);
+  const scaledOutline = scaleStyleMetric(resolvedCfg.outline, subtitleSize);
+  const scaledShadow = scaleStyleMetric(resolvedCfg.shadow, subtitleSize);
 
   if (timestamps.length > 0) {
     const last = timestamps[timestamps.length - 1];
     console.log(
-      `Subtitles: ${timestamps.length} words, span ${timestamps[0].start.toFixed(2)}s — ${last.end.toFixed(2)}s (preset: ${preset}, effect: ${wordEffectMode})`
+      `Subtitles: ${timestamps.length} words, span ${timestamps[0].start.toFixed(2)}s — ${last.end.toFixed(2)}s (preset: ${preset}, effect: ${wordEffectMode}, size: ${subtitleSize})`
     );
   }
 
   const groups = groupWords(timestamps);
-  const events = buildDialogueEvents(groups, cfg, wordEffectMode);
+  const events = buildDialogueEvents(groups, resolvedCfg, wordEffectMode);
 
   const styleLine = [
     "Default",
-    cfg.fontname,
-    cfg.fontsize,
-    cfg.primaryColour,
+    resolvedCfg.fontname,
+    scaledFontSize,
+    resolvedCfg.primaryColour,
     "&H000000FF",
-    cfg.outlineColour,
-    cfg.backColour,
-    cfg.bold,
+    resolvedCfg.outlineColour,
+    resolvedCfg.backColour,
+    resolvedCfg.bold,
     0, 0, 0,      // Italic, Underline, StrikeOut
     100, 100,      // ScaleX, ScaleY
     2, 0,          // Spacing, Angle
     1,             // BorderStyle
-    cfg.outline,
-    cfg.shadow,
+    scaledOutline,
+    scaledShadow,
     5,             // Alignment (top-center for short-form)
     60, 60, 350,   // MarginL, MarginR, MarginV
     1,             // Encoding
